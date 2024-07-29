@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as func
 from math import ceil, floor, log
 from typing import List
+import numpy as np
+
 
 class Callable:
     def __init__(self) -> None:
@@ -25,10 +27,10 @@ class DetectorBase(Callable):
         return x.shape[self.t_dim], x.shape[self.f_dim]
     
     def _sum_time(self, x: Tensor):
-        torch.sum(x, self.t_dim, keepdim=False)
+        return torch.sum(x, self.t_dim, keepdim=False)
         
     def _sum_freq(self, x: Tensor):
-        torch.sum(x, dim=self.f_dim, keepdim=False)    
+        return torch.sum(x, dim=self.f_dim, keepdim=False)    
     
     
 class NarrowSelection(DetectorBase):
@@ -49,15 +51,20 @@ class NarrowSelection(DetectorBase):
         return x.narrow(self.f_dim, start=k0, length=(k1-k0+1)).narrow(self.t_dim, start=n0, length=(n1-n0+1))
     
 def _rolling_func(X: Tensor, dim, M, f, pad_mode = 'reflect', val=None):
+    if len(X.shape) == 1: 
+        X = X[:, None]
     L = X.shape[dim]
     Xc = X.swapaxes(-1, dim)
     W = 2 * M + 1
     padded_len = Xc.shape[-1] + W
-    pad_zeros = ceil(padded_len / W) * W - padded_len
+    # pad_zeros = ceil(padded_len / W) * W - padded_len
     Xc = func.pad(Xc, (M, M), mode=pad_mode, value=val)
-    Xc = func.pad(Xc, (0, pad_zeros)).contiguous() #add zeros for even division
+    # Xc = func.pad(Xc, (0, pad_zeros)).contiguous() #add zeros for even division
     Xu = Xc.unfold(-1, W, 1) # last dimension is of the window size
-    y: Tensor = f(Xu, dim=-1, keepdim=False) # compute the function over this dimension
+    y : Tensor
+    if f == torch.median or f == torch.max or f == torch.min:
+        y, _ = f(Xu, dim=-1, keepdim=False) # compute the function over this dimension
+    else: y = f(Xu, dim=-1, keepdim=False)
     return y.narrow(-1, 0, L).swapaxes(-1, dim).contiguous() # return the computed value with original shape intact
 
 class RollingFunction(Callable):
@@ -82,11 +89,16 @@ class SpectralWhitener(DetectorBase):
         super().__init__(t_dim, f_dim)   
         self.nu = nu
         self.frequency_suppressor = RollingMedian(self.f_dim, M_f)
-        self.transient_suppressor = RollingMedian(self.f_dim, M_t)
+        self.transient_suppressor = RollingMedian(self.t_dim, M_t)
         self.noise_estimator = RollingAverage(self.t_dim, M_n)
         
     def apply(self, X: Tensor) -> Tensor:
-        return self.noise_estimator(self.transient_suppressor(self.frequency_suppressor(X)) ** (2*self.nu)) ** (1 / 2 / self.nu)   
+        xf = self.frequency_suppressor(X)
+        xt = self.transient_suppressor(xf)
+        self.noise = self.noise_estimator( 
+                                     xt ** (2*self.nu) 
+                                    ) ** (1 / 2 / self.nu) 
+        return X / self.noise 
     
     
 class SpectralEntropy(DetectorBase):
@@ -135,7 +147,7 @@ class HelbleWhitening(DetectorBase):
         L = X_abs.shape[self.t_dim]
         X_sort, _ = torch.sort(X_abs, dim=self.t_dim)
         j_min = L//4
-        return torch.mean(X_sort.narrow(self.f_dim, j_min, L//2), dim=self.t_dim, keepdim=True)
+        return torch.mean(X_sort.narrow(self.t_dim, j_min, L//2), dim=self.t_dim, keepdim=True)
     
   
 class GPLBase(DetectorBase):
@@ -208,11 +220,19 @@ class SignalProbGamma(SignalProbPDF):
         return Gamma.cdf(X)
     
 class SignalProbBeta(SignalProbPDF):
-    def __init__(self, kappa, minimum: float, maximum: float, invert = False) -> None:
+    def __init__(self, kappa, minimum: float, maximum: float, invert = False, sig = 0.05) -> None:
         super().__init__(kappa)        
         self.max = maximum
         self.min = minimum
         self.invert = invert
+        self.sig = sig
+        
+    def build_cdf_lut(self, N=1023):
+        x = torch.linspace(0, 1, N)
+        pdf = self.beta_dist.log_prob(x).exp()
+        self.beta_cdf_lut = torch.cumsum(pdf, dim=0).numpy() / N
+        self.crit_val = np.interp(1 - self.sig, self.beta_cdf_lut, x) # find the inverse cdf critical value
+        
         
     def apply(self, X: Tensor) -> Tensor:
         
@@ -227,28 +247,43 @@ class SignalProbBeta(SignalProbPDF):
         nu = mu * (1 - mu) / var -1
         alpha = mu * nu
         beta = (1 - mu) * nu
-        Beta = torch.distributions.beta.Beta(alpha, beta)
-        return Beta.cdf(X)
+        self.beta_dist = torch.distributions.beta.Beta(alpha, beta)
+        self.build_cdf_lut()
+        return X >= self.crit_val
     
 class DetectorChain(Callable):
     def __init__(self, chain: List[Callable]) -> None:
         self.chain = chain
+        self.results: List[Tensor] = []
         
     def apply(self, X: Tensor) -> Tensor:
         for c in self.chain:
             X = c(X)
+            self.results.append(X)
         return X
+    
+    def get_statistic(self):
+        return self.results[-1]
     
 def helble_gpl(nu_1=1, nu_2=2, gamma=1, t_dim=0, f_dim=1) -> DetectorChain:
     # Tyler A. Helble et. al., "A generalized power-law detection algorithm for humpback whale vocalizations", JASA 2012
     # This function returns the detector as presented in their work
-    # This detector performs whitening via the HelbleWhitening procedure (compute the noise mean of |X|, mu_k for each frequency slice k, then compute ||X| - mu_k|)
+    # This detector performs whitening via the HelbleWhitening procedure (compute the noise mean of mu_k |X|, for each frequency bin k over time, then compute ||X| - mu_k|)
     # After whitening, the normalised "spectrogram" N is summed to produce the test statistic
     return DetectorChain([
         HelbleWhitening(t_dim, f_dim, gamma), 
         GPLBase(nu_1, nu_2, t_dim, f_dim)])  
+    
+def aw_gpl(Mf, Mt, Mn, nu_1=1, nu_2=2, t_dim=0, f_dim=1) -> DetectorChain:
+    # Tyler A. Helble et. al., "A generalized power-law detection algorithm for humpback whale vocalizations", JASA 2012
+    # This function returns the detector as presented in their work
+    # This detector performs whitening via the HelbleWhitening procedure (compute the noise mean of mu_k |X|, for each frequency bin k over time, then compute ||X| - mu_k|)
+    # After whitening, the normalised "spectrogram" N is summed to produce the test statistic
+    return DetectorChain([
+        SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
+        GPLBase(nu_1, nu_2, t_dim, f_dim)]) 
 
-def proposed_detector(K, k0, k1, Mf, Mt, Mn, t_dim=0, f_dim=1) -> DetectorChain:
+def proposed_detector(k0, k1, Mf, Mt, Mn, Mh, sig, t_dim=0, f_dim=1) -> DetectorChain:
     # the detector proposed by this paper
     # 1. select relevant frequency indices k0 to k1
     # 2. whiten the spectrum with the proposed whitening method
@@ -257,9 +292,40 @@ def proposed_detector(K, k0, k1, Mf, Mt, Mn, t_dim=0, f_dim=1) -> DetectorChain:
     return DetectorChain([
         NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim), 
         SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
-        SpectralEntropy(nu=1, t_dim=t_dim, f_dim=f_dim), 
-        SignalProbBeta(kappa=0.5, minimum=0, maximum=log(K), invert=True)
+        # HelbleWhitening(t_dim, f_dim, 1), 
+        SpectralEntropy(nu=2, t_dim=t_dim, f_dim=f_dim), 
+        RollingMedian(0, Mh),
+        SignalProbBeta(kappa=0.85, minimum=0, maximum=log(k1 - k0 + 1), invert=True, sig=sig),
         ]) 
+    
+def _find_start_end_pairs(T_th: Tensor):
+    T_th[-1] = False #must always end the detection on the last sample, otherwise we won't have matching pairs
+    prev = torch.zeros_like(T_th)
+    prev[1:] = T_th[:-1]
+    # edge detection
+    start_mask = T_th & ~prev #whether the current sample is a new detection start, i.e., prev low -> curr high
+    end_mask = ~T_th & prev #whether the current sample is a new detection end, i.e., prev high -> curr low
+    start_idx = torch.nonzero(start_mask[:]).tolist()
+    end_idx = torch.nonzero(end_mask[:]).tolist()
+    return [s[0] for s in start_idx], [e[0] for e in end_idx]
+    
+def get_detections(T: Tensor, thresh, Tmin, Text, fs):
+    Nmin = floor(Tmin * fs)
+    Next = floor(Text * fs)
+    T = T.squeeze() # get rid of empty dims
+    T_th = T > thresh
+    start_idx, end_idx = _find_start_end_pairs(T_th)
+    # remove short detections
+    for i, j in zip(start_idx, end_idx):
+        if j - i < Nmin:
+            T_th[i:j] = False
+    # now do it again, except with boundary extension, using morphological dilation (rolling max)
+    T_th = _rolling_func(T_th, 0, Next, torch.max, pad_mode='constant', val=0)
+    start_idx, end_idx = _find_start_end_pairs(T_th)
+    detections = [(i/fs, j/fs) for i, j in zip(start_idx, end_idx)]
+    return detections
+    
+    
 
 
 

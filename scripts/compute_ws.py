@@ -53,7 +53,8 @@ def compute_scattering(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
         for p in Sp.keys():
             s: Tensor = Sp[p]
             N = L//d if allow_ds else L
-            s = s.reshape((s.shape[0] * s.shape[1],))[padding:(padding+ N)].cpu()
+            s = s[:, padding:(padding+ N)]
+            s = s.reshape((s.shape[0] * s.shape[1],)).cpu()
             if len(p) == 1:
                 if(p[0] != 0): # not interested in S0
                     S1[p[0]] = s
@@ -81,8 +82,8 @@ if __name__ == '__main__':
     # 250 Hz sampling rate
     # invariance downsampling factor of 32 ~ 128 ms
     # Q of 16 followed by 8
-    compute_scattering(1, 2**15, [8, 4], 32, 30, 'bm-d')
-    compute_scattering(1, 2**15, [8, 4], 32, 30, 'bm-d-no-ds', False) #for plots
+    compute_scattering(1, 2**15, [8, 4], 32, 20, 'bm-d')
+    compute_scattering(1, 2**15, [8, 4], 32, 20, 'bm-d-no-ds', False) #for plots
             
         
         
