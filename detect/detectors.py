@@ -2,7 +2,7 @@ from torch import Tensor
 import torch 
 import torch.nn.functional as func
 from math import ceil, floor, log
-from typing import List
+from typing import List, Dict
 import numpy as np
 
 
@@ -31,7 +31,6 @@ class DetectorBase(Callable):
         
     def _sum_freq(self, x: Tensor):
         return torch.sum(x, dim=self.f_dim, keepdim=False)    
-    
     
 class NarrowSelection(DetectorBase):
     def __init__(self, t_dim=0, f_dim=1, n0=0, n1=-1, k0=0, k1=-1) -> None:
@@ -219,6 +218,16 @@ class SignalProbGamma(SignalProbPDF):
         Gamma = torch.distributions.gamma.Gamma(alpha, beta)
         return Gamma.cdf(X)
     
+class EntropyScaler(Callable):
+    # scales SE between 0-1 for easier threshold selection
+    
+    def __init__(self, K) -> None:
+        super().__init__()        
+        self.K = K    
+        
+    def apply(self, X: Tensor) -> Tensor:        
+        return 1 - X / log(self.K)
+    
 class SignalProbBeta(SignalProbPDF):
     def __init__(self, kappa, minimum: float, maximum: float, invert = False, sig = 0.05) -> None:
         super().__init__(kappa)        
@@ -265,38 +274,79 @@ class DetectorChain(Callable):
     def get_statistic(self):
         return self.results[-1]
     
-def helble_gpl(nu_1=1, nu_2=2, gamma=1, t_dim=0, f_dim=1) -> DetectorChain:
+def helble_gpl(nu_1=1, nu_2=2, gamma=1, t_dim=0, f_dim=1, k0=0, k1=-1) -> DetectorChain:
     # Tyler A. Helble et. al., "A generalized power-law detection algorithm for humpback whale vocalizations", JASA 2012
     # This function returns the detector as presented in their work
     # This detector performs whitening via the HelbleWhitening procedure (compute the noise mean of mu_k |X|, for each frequency bin k over time, then compute ||X| - mu_k|)
     # After whitening, the normalised "spectrogram" N is summed to produce the test statistic
     return DetectorChain([
-        HelbleWhitening(t_dim, f_dim, gamma), 
-        GPLBase(nu_1, nu_2, t_dim, f_dim)])  
+            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+            HelbleWhitening(t_dim, f_dim, gamma), 
+            GPLBase(nu_1, nu_2, t_dim, f_dim)
+        ])  
     
-def aw_gpl(Mf, Mt, Mn, nu_1=1, nu_2=2, t_dim=0, f_dim=1) -> DetectorChain:
-    # Tyler A. Helble et. al., "A generalized power-law detection algorithm for humpback whale vocalizations", JASA 2012
-    # This function returns the detector as presented in their work
-    # This detector performs whitening via the HelbleWhitening procedure (compute the noise mean of mu_k |X|, for each frequency bin k over time, then compute ||X| - mu_k|)
-    # After whitening, the normalised "spectrogram" N is summed to produce the test statistic
+def aw_gpl(Mf, Mt, Mn, nu_1=1, nu_2=2, t_dim=0, f_dim=1, k0=0, k1=-1) -> DetectorChain:
     return DetectorChain([
+        NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
         SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
         GPLBase(nu_1, nu_2, t_dim, f_dim)]) 
 
-def proposed_detector(k0, k1, Mf, Mt, Mn, Mh, sig, t_dim=0, f_dim=1) -> DetectorChain:
+def proposed_detector(k0, k1, Mf, Mt, Mn, Mh, sig, t_dim=0, f_dim=1, nu=2, kappa = 0.85) -> DetectorChain:
     # the detector proposed by this paper
     # 1. select relevant frequency indices k0 to k1
     # 2. whiten the spectrum with the proposed whitening method
     # 3. compute spectral entropy as test statistic
     # 4. convert test statistic to the probability that the entropy is not drawn from the noise entropy distribution
     return DetectorChain([
-        NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim), 
+        NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
         SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
-        # HelbleWhitening(t_dim, f_dim, 1), 
-        SpectralEntropy(nu=2, t_dim=t_dim, f_dim=f_dim), 
+        SpectralEntropy(nu=nu, t_dim=t_dim, f_dim=f_dim), 
         RollingMedian(0, Mh),
-        SignalProbBeta(kappa=0.85, minimum=0, maximum=log(k1 - k0 + 1), invert=True, sig=sig),
+        SignalProbBeta(kappa=kappa, minimum=0, maximum=log(k1 - k0 + 1), invert=True, sig=sig),
         ]) 
+    
+def se(k0, k1, t_dim=0, f_dim=1, nu=1) -> DetectorChain:
+    return DetectorChain([
+        NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+        SpectralEntropy(nu=nu, t_dim=t_dim, f_dim=f_dim), 
+        EntropyScaler(k1 - k0 + 1)
+        ]) 
+    
+def nuttall(k0, k1, nu = 2.5, t_dim=0, f_dim=1) -> DetectorChain:
+    return DetectorChain(
+        [
+            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+            Nuttall(nu, t_dim=t_dim, f_dim=f_dim)
+        ]
+    )
+    
+def bled(k0, k1, t_dim=0, f_dim=1) -> DetectorChain:
+    # BLED is a special case of Nuttall, where we sum the squares
+    return DetectorChain(
+        [
+            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+            Nuttall(1, t_dim=t_dim, f_dim=f_dim)
+        ]
+    )
+
+def aw_nuttall(k0, k1, Mf, Mt, Mn, nu = 2.5, t_dim=0, f_dim=1) -> DetectorChain:
+    return DetectorChain(
+        [
+            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+            SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
+            Nuttall(nu, t_dim=t_dim, f_dim=f_dim)
+        ]
+    )
+    
+def aw_bled(k0, k1, Mf, Mt, Mn, t_dim=0, f_dim=1) -> DetectorChain:
+    # BLED is a special case of Nuttall, where we sum the squares
+    return DetectorChain(
+        [
+            SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
+            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
+            Nuttall(1, t_dim=t_dim, f_dim=f_dim)
+        ]
+    )
     
 def _find_start_end_pairs(T_th: Tensor):
     T_th[-1] = False #must always end the detection on the last sample, otherwise we won't have matching pairs
@@ -309,21 +359,23 @@ def _find_start_end_pairs(T_th: Tensor):
     end_idx = torch.nonzero(end_mask[:]).tolist()
     return [s[0] for s in start_idx], [e[0] for e in end_idx]
     
-def get_detections(T: Tensor, thresh, Tmin, Text, fs):
+def get_detections(T: Tensor, thresh, Tmin, Tmax, Text, fs):
     Nmin = floor(Tmin * fs)
+    Nmax = floor(Tmax * fs)
     Next = floor(Text * fs)
     T = T.squeeze() # get rid of empty dims
     T_th = T > thresh
     start_idx, end_idx = _find_start_end_pairs(T_th)
-    # remove short detections
+    # remove short and long detections
     for i, j in zip(start_idx, end_idx):
-        if j - i < Nmin:
+        if j - i < Nmin or j - i > Nmax:
             T_th[i:j] = False
     # now do it again, except with boundary extension, using morphological dilation (rolling max)
     T_th = _rolling_func(T_th, 0, Next, torch.max, pad_mode='constant', val=0)
     start_idx, end_idx = _find_start_end_pairs(T_th)
     detections = [(i/fs, j/fs) for i, j in zip(start_idx, end_idx)]
-    return detections
+    idx = [(i, j) for i, j in zip(start_idx, end_idx)]
+    return detections, idx
     
     
 

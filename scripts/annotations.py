@@ -33,7 +33,8 @@ def get_annotations(fname, t1, t2, cls=None):
                 'f_end': row['High Freq (Hz)'],
                 'overlap': (min(te, t2) - max(tb, t1)) / (te - tb),
                 'duration': te - tb,
-                'freq_range': row['High Freq (Hz)'] - row['Low Freq (Hz)']
+                'freq_range': row['High Freq (Hz)'] - row['Low Freq (Hz)'],
+                'fname': fname
             }
         )
     return anns
