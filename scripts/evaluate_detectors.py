@@ -5,19 +5,11 @@ import load_path
 import detect.detectors as det
 import tf_loader as loader
 from typing import Tuple, Dict
-from detection_processing import prec_reca_counts, calc_prec_rec, calc_fp_ph
+from detection_processing import prec_reca_counts, calc_prec_rec, calc_fp_ph, s1_to_tf
 from parameters import Parameters, BM_ANT_PARAMETERS, BM_D_PARAMETERS
 from pprint import pprint
-
-
-def s1_to_tf(S1):
-    X = []
-    f = []
-    for _lambda in sorted(S1.keys()):
-        X.append(S1[_lambda][:, None])
-        f.append(_lambda / np.pi / 2 * 250)
-    X = torch.concat(X, dim=1).T
-    return X
+import json
+from tqdm import tqdm
 
 
 def iteration(thresholds: Dict, iter_num = None):
@@ -66,8 +58,7 @@ def iteration(thresholds: Dict, iter_num = None):
             proposed_stft = det.proposed_detector(k0_stft, k1_stft, Mf, Mt, Mn, Mh, thresh['proposed_stft'], t_dim=1, f_dim=0, kappa=params.kappa)
             proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh['proposed_ws'], t_dim=1, f_dim=0, kappa=params.kappa)
             
-            thresh['proposed_stft'] = 0.5
-            thresh['proposed_ws'] = 0.5
+            
             
             # Baseline SE, with no modifications
             se_stft = det.se(k0_stft, k1_stft, t_dim=1, f_dim=0)
@@ -102,7 +93,7 @@ def iteration(thresholds: Dict, iter_num = None):
                 T = detector.apply(tf)
                 
                 # set the min and max statistics
-                if not key in T_stats: T_stats[key] = [10e12, 0, 0] #min, max, mean                
+                if not key in T_stats: T_stats[key] = [10e20, 0, 0] #min, max, mean                
                 
                 
                 T_stats[key][0] = min(T_stats[key][0], T.min().item())
@@ -110,6 +101,7 @@ def iteration(thresholds: Dict, iter_num = None):
                 T_stats[key][2] = T_stats[key][2]/2 + T.type(torch.float32).mean().item()/2
                 
                 t = thresh[key]
+                if 'proposed' in key: t = 0.5
                 detections, _ = det.get_detections(T, t, Tmin, Tmax, Text, fs_tf)
                 if not key in results: results[key] = [0, 0, 0]
                 Nt, Ndet, Nann = prec_reca_counts(detections, annotations)
@@ -118,13 +110,20 @@ def iteration(thresholds: Dict, iter_num = None):
                 results[key][2] += Nann
                 
         for k, counts in results.items():
-            results[k] = (calc_prec_rec(*counts), calc_fp_ph(*counts) )
+            prec, reca = calc_prec_rec(*counts)
+            fpph = calc_fp_ph(*counts) #false positives per hour
+            results[k] = {
+                'prec': prec,
+                'reca': reca,
+                'fpph': fpph,
+                'thresh': thresh[k]
+            }
             
         if iter_num == None:
             print(params.cls)
             pprint(T_stats)  
                 
-        return results
+        return results if iter_num != None else T_stats
                 
     return iteration_cls(BM_ANT_PARAMETERS, ant_ws, ant_stft), iteration_cls(BM_D_PARAMETERS, d_ws, d_stft)
 
@@ -141,47 +140,56 @@ if __name__ == "__main__":
                 'bled_aw': 0,
             } 
     
-    N = 2
+    bm_a_stats, bm_d_stats = iteration(t) # will return the min, max, mean stats
+    
+    N = 50
     even_spacing = lambda low, high: np.linspace(low, high, N).tolist()
     exp_spacing = lambda low, high: np.exp(np.linspace(np.log(low), np.log(high), N)).tolist()
     log_spacing = lambda low, high: np.log(np.linspace(np.exp(low), np.exp(high), N)).tolist()
     
+    # automatically choose
     thresholds = {
         'A': {
-                'bled':             exp_spacing(6e-5, 0.00003),
-                'bled_aw':          exp_spacing(10, 60),
-                'gpl_stft':         exp_spacing(0.0002, 0.004),
-                'gpl_ws':           exp_spacing(0.0002, 0.002),
-                'nuttall':          exp_spacing(10e-12, 100e-12),
-                'nuttall_aw':       exp_spacing(20000, 1e5),
-                'proposed_stft':    exp_spacing(0.3, 0.001),
-                'proposed_ws':      exp_spacing(0.3, 0.001),
-                'se_stft':          even_spacing(0.3, 0.5),
+                'bled'          :    exp_spacing (bm_a_stats['bled'          ][0], bm_a_stats['bled'          ][1]/2),
+                'bled_aw'       :    exp_spacing (bm_a_stats['bled_aw'       ][0], bm_a_stats['bled_aw'       ][1]/2),
+                'gpl_stft'      :    exp_spacing (bm_a_stats['gpl_stft'      ][0], bm_a_stats['gpl_stft'      ][1]/2),
+                'gpl_ws'        :    exp_spacing (bm_a_stats['gpl_ws'        ][0], bm_a_stats['gpl_ws'        ][1]/2),
+                'nuttall'       :    exp_spacing (bm_a_stats['nuttall'       ][0], bm_a_stats['nuttall'       ][1]/2),
+                'nuttall_aw'    :    exp_spacing (bm_a_stats['nuttall_aw'    ][0], bm_a_stats['nuttall_aw'    ][1]/2),
+                'proposed_stft' :    exp_spacing (0.3                            , 0.005                            ),
+                'proposed_ws'   :    exp_spacing (0.3                            , 0.005                            ),
+                'se_stft'       :    even_spacing(bm_a_stats['se_stft'       ][0], bm_a_stats['se_stft'       ][1]/2),
             },
         'D' : {
-                'bled':             exp_spacing(0.1e-5, 6e-5),
-                'bled_aw':          exp_spacing(200, 300),
-                'gpl_stft':         exp_spacing(4e-5, 0.002),
-                'gpl_ws':           exp_spacing(6e-5, 0.002),
-                'nuttall':          exp_spacing(10e-12, 2e-10),
-                'nuttall_aw':       exp_spacing(20000, 1e5),
-                'proposed_stft':    log_spacing(0.3, 0.001),
-                'proposed_ws':      log_spacing(0.3, 0.001),
-                'se_stft':          even_spacing(0.35, 0.8),
+                'bled'          :    exp_spacing (bm_d_stats['bled'          ][0], bm_d_stats['bled'          ][1]/2),
+                'bled_aw'       :    exp_spacing (bm_d_stats['bled_aw'       ][0], bm_d_stats['bled_aw'       ][1]/2),
+                'gpl_stft'      :    exp_spacing (bm_d_stats['gpl_stft'      ][0], bm_d_stats['gpl_stft'      ][1]/2),
+                'gpl_ws'        :    exp_spacing (bm_d_stats['gpl_ws'        ][0], bm_d_stats['gpl_ws'        ][1]/2),
+                'nuttall'       :    exp_spacing (bm_d_stats['nuttall'       ][0], bm_d_stats['nuttall'       ][1]/2),
+                'nuttall_aw'    :    exp_spacing (bm_d_stats['nuttall_aw'    ][0], bm_d_stats['nuttall_aw'    ][1]/2),
+                'proposed_stft' :    exp_spacing (0.3                            , 0.005                            ),
+                'proposed_ws'   :    exp_spacing (0.3                            , 0.005                            ),
+                'se_stft'       :    even_spacing(bm_d_stats['se_stft'       ][0], bm_d_stats['se_stft'       ][1]/2),
             }        
     }
         
     
     results_a = []
     results_d = []
-    for i in range(N):
-        print(i)
+    for i in tqdm(range(N)):
         a, d = iteration(thresholds, iter_num=i)
         results_a.append(a)
         results_d.append(d)
         
-    print('BM-ANT')
-    pprint(results_a)
-    print('BM-D')
-    pprint(results_d)
+    with open('results/bm_a_detector_results.json', 'w') as file:
+        json.dump(results_a, file, indent=4)
+    with open('results/bm_d_detector_results.json', 'w') as file:
+        json.dump(results_d, file, indent=4)
+        
+    # print('BM-ANT')
+    # pprint(results_a)
+    # print('BM-D')
+    # pprint(results_d)
+    
+    
         

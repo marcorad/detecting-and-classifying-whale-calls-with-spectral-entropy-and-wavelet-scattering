@@ -21,6 +21,9 @@ class Loader:
         self.counter += 1
         return self.__getitem__(self.counter - 1)
     
+    def get_current_fname(self):
+        return self.files[self.counter - 1][:-4]
+    
     def __getitem__(self, i: int):
         fname = self.files[i]
         with open(f'{self.path}/{fname}', 'rb') as file:
