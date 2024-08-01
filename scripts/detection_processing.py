@@ -4,7 +4,10 @@ from parameters import Parameters
 from typing import Dict, List, Any, Tuple
 from torch import Tensor
 import torch
-from annotations import has_class
+from annotations import get_annotations
+from scipy.fftpack import dct
+from torch.nn.functional import pad
+
 
 def prec_reca_counts(detections, anns):
     for a in anns: a['detected'] = False
@@ -48,64 +51,93 @@ def compute_clf_window_idx(idx: Tuple[int, int], params: Parameters):
     w = params.N_clf_win
     idx_start = mid - w//2
     idx_end = idx_start + w
-    return idx_start, idx_end
+    return idx_start + w, idx_end + w # offset to correspond to padding
 
-def pool_detection(s: Tensor, idx: Tuple[int, int], params: Parameters):
-    s = s.squeeze()
-    L = s.shape[0]
-    pad_left = -idx[0] if idx[0] < 0 else 0
-    pad_right = idx[0] - L if idx[0] > L else 0
-    L_seg = params.N_clf_seg_length
-    sfeats = s[max(idx[0],0):min(idx[1], L)]
-    # add mirror padding, if required
-    if pad_left > 0: sfeats = torch.concat([sfeats[1:pad_left+1].flip(), sfeats])
-    if pad_right > 0: sfeats = torch.concat([sfeats, sfeats[L-pad_right-1:L].flip()])
+def pool_detection(s: Tensor, idx: Tuple[int, int], params: Parameters) -> Tensor:
+    
+    sfeats = s[:, idx[0]:idx[1]]
+    if sfeats.isnan().any():
+        pass
+    L_seg = params.N_clf_win
     
     # now pool the segments
-    sfeats = sfeats.unfold(dimension=0, size=L_seg, step=L_seg)
+    sfeats = sfeats.unfold(dimension=-1, size=L_seg, step=L_seg)
     pt = params.pooling_type
     if pt == 'max':
-        sfeats, _ = torch.max(sfeats, dim=1, keepdim=False)
+        sfeats, _ = torch.max(sfeats, dim=-1, keepdim=False)
     elif pt == 'mean':
-        sfeats = torch.mean(sfeats, dim=1, keepdim=False)
+        sfeats = torch.mean(sfeats, dim=-1, keepdim=False)
     elif pt == 'median':
-        sfeats, _ = torch.median(sfeats, dim=1, keepdim=False)
+        sfeats, _ = torch.median(sfeats, dim=-1, keepdim=False)
     return sfeats
+
+def interval_overlaps_annotation(t1, t2, anns):
+    for a in anns:    
+        if np.maximum(t1, a['t_start']) <= np.minimum(t2, a['t_end']):
+            return True
+    return False
 
 def compute_features(S1: Dict[float, Tensor], S2: Dict[float, Dict[float, Tensor]], 
                      det_idx: List[Tuple[int, int]], params: Parameters, fname):
     
-    # compute the data and class tensors for a specific file, given a list of detections and the clf parameters
+    # compute the data and class tensors for a specific file, given a list of detections and the clf parameters  
+    
+    # transform s1 coeffs
+    s1_tf = []        
+    for lambda1 in sorted(S1.keys()):
+        s1_tf.append(S1[lambda1][None, :])
+    s1_tf = torch.concat(s1_tf, dim=0)
+
+    if params.log_scattering_coeffs: s1_tf = torch.log(s1_tf + params.eps)  
+    if params.scattering_dct: s1_tf = Tensor(dct(s1_tf.numpy(), axis=0))
+
+    
+    # transform s2 coeffs
+    s2_tfs = []
+    for lambda1 in sorted(S1.keys()):
+        if lambda1 in S2:
+            s2_tf = []
+            for lambda2 in sorted(S2[lambda1].keys()):
+                s_lambda2 = S2[lambda1][lambda2]
+                s_lambda1 = S1[lambda1]
+                if params.normalise_s2: s_lambda2 = s_lambda2 / (s_lambda1 + params.eps)
+                s2_tf.append(s_lambda2[None, :])
+            s2_tf = torch.concat(s2_tf, dim=0)
+                
+            
+            if params.log_scattering_coeffs: s2_tf = torch.log(s2_tf + params.eps)   
+            if params.scattering_dct: s2_tf = Tensor(dct(s2_tf.numpy(), axis=0))
+            s2_tfs.append(s2_tf)   
+
+         
+    # create feature matrix
+    if len(s2_tfs) > 0: 
+        s2_tfs = torch.concat(s2_tfs, dim=0)
+        S_feats = torch.concat([s1_tf, s2_tfs], dim=0) # [N_paths, L]  
+    else: S_feats = s1_tf # [N_paths, L]  
+    
+    # pad the matrix with reflection in the time dimension to deal with detections on the boundaries
+    S_feats = pad(S_feats, (params.N_clf_win, params.N_clf_win), mode='reflect')
+    
+    anns = get_annotations(fname, 0, 10e6, params.cls)
     
     X = []
     y = []
-    
     for idx in det_idx:
         feats = []        
         # assign the class before window extension - 
         # we don't want a neighbouring call to be considered if it is not centered on the detection window
         t_det = (idx[0]/params.fs_tf, idx[1]/params.fs_tf)
-        y.append(1 if has_class(fname, t_det[0], t_det[1], params.cls) else 0)
+        y.append(1 if interval_overlaps_annotation(*t_det, anns) else 0)
         
         # compute the window (indices may be out of bounds, handled by the pool_detection function)
-        idx = compute_clf_window_idx(idx, params)
-        
-        for _lambda1, s_lambda1 in S1.items():
-            # add S1 coeffs
-            s1_feats = pool_detection(s_lambda1, idx, params)
-            if params.log_scattering_coeffs: s1_feats = torch.log(s1_feats + params.log_scattering_eps)
-            feats.append(s1_feats)
-            
-            # add the S2 coeffs of the corresponding S1 (there may not be S2 coeffs, depending on the BW of the S1 wavelet)
-            if _lambda1 in S2:
-                S2_lambda2 = S2[_lambda1]
-                for lambda2, s_lambda2 in S2_lambda2.items():
-                    if params.normalise_s2: s_lambda2 = s_lambda2 / s_lambda1
-                    s2_feats = pool_detection(s_lambda2, idx, params)
-                    if params.log_scattering_coeffs: s2_feats = torch.log(s2_feats + params.log_scattering_eps)
-                    feats.append(s2_feats)
-        x = torch.concat(feats, dim=0)
+        w_idx = compute_clf_window_idx(idx, params)      
+        x: Tensor = pool_detection(S_feats, w_idx, params).flatten()
+        if params.normalise_feature_vector: x = x / (x*x).sum()
+        x = torch.concat([x, Tensor([idx[1] - idx[0]])]) # add the detection length as a feature
         X.append(x[None, :])
-        
-    X = torch.concat(X, dim=0) # N x d feature matrix, as is standard in many python ML libs
+      
+    if len(X) > 0:  
+        X = torch.concat(X, dim=0) # N x d feature matrix, as is standard in many python ML libs 
+    else: X = None   
     return X, y

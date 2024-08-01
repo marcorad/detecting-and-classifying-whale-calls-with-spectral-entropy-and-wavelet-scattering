@@ -4,7 +4,7 @@ from torch import Tensor
 import torch
 import numpy as np
 import load_path
-from annotations import get_annotations, has_class
+from annotations import get_annotations
 import os
 import math
 from matplotlib.ticker import NullFormatter
@@ -18,10 +18,10 @@ BM_D_PKL_FILES = os.listdir(BM_D_PATH)
 BM_ANT_PATH = 'tmp/bm-ant/ws'
 BM_ANT_PKL_FILES = os.listdir(BM_ANT_PATH) 
 
-f_plot = BM_ANT_PKL_FILES[7]
-with open(f'{BM_ANT_PATH}/{f_plot}', 'rb') as file:
+f_plot = BM_D_PKL_FILES[7]
+with open(f'{BM_D_PATH}/{f_plot}', 'rb') as file:
     S1, S2 = pkl.load(file)
-anns = get_annotations(f_plot[:-4], 0, 1e6, 'A')
+anns = get_annotations(f_plot[:-4], 0, 1e6, 'D')
 print(anns)
 
 def s1_to_img(S1, fs=250):
@@ -29,7 +29,7 @@ def s1_to_img(S1, fs=250):
     f = []
     for _lambda in sorted(S1.keys()):        
         X.append(S1[_lambda][:, None])
-        f.append(_lambda / np.pi / 2 * 125)
+        f.append(_lambda / np.pi / 2 * 250)
     X = torch.concat(X, dim=1).numpy().T
     return np.arange(X.shape[1]) / fs, f, X
 
@@ -47,7 +47,7 @@ def plot_s(t, f, x, t1, dur, ax, fs=250, file = None):
     ax.set_yticklabels([f'{fi:.1f}' for fi in f[::2]])
     
     if file != None:
-        anns = get_annotations(file, t1 - 50, t1+dur+50, 'A')
+        anns = get_annotations(file, t1 - 50, t1+dur+50, 'D')
         for ann in anns:
             tst, te, fst, fe = ann['t_start'], ann['t_end'], ann['f_start'], ann['f_end']
             r = Rectangle((tst, fst), ann['duration'], ann['freq_range'], linewidth=1, edgecolor='r', facecolor='none')
@@ -59,16 +59,16 @@ def plot_s(t, f, x, t1, dur, ax, fs=250, file = None):
 fig, ax = plt.subplots(1, 1)        
     
 # t1 = 310
-t1 = 500
+t1 = 1810
 dur = 40
 fname = f_plot[:-4] 
-fs = 125/64
+fs = 250/32
 
 t, f, x = s1_to_img(S1, fs)
 plot_s(t, f, x, t1, dur, ax, file=fname, fs=fs)
 
 print(x.shape)
-det1 = det.proposed_detector(0, x.shape[0]-1, 2, 30, int(fs*60*5), 2, 0.3, f_dim=0, t_dim=1, kappa=0.9)
+det1 = det.proposed_detector(0, x.shape[0]-1, 1, 100, int(fs*60*5), 2, 0.05, f_dim=0, t_dim=1, kappa=0.9)
 det2 = det.helble_gpl(f_dim=0, t_dim=1)
 det3 = det.aw_gpl(2, 12, 150, f_dim=0, t_dim=1)
 det1.apply(torch.from_numpy(x))

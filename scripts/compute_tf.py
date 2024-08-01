@@ -58,10 +58,12 @@ def compute_tf(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
         S1 = {}
         S2 = {}
         for p in Sp.keys():
+            print(p)
             s: Tensor = Sp[p]
             N = L//d if allow_ds else L
             s = s[:, padding:(padding+ N)]
             s = s.reshape((s.shape[0] * s.shape[1],)).cpu()
+            s[s < 0] = 0 # sometimes, floating point error due to FFT convolution with phi can cause it to be slightly smaller than 0, so clamp it!
             if len(p) == 1:
                 if(p[0] != 0): # not interested in S0
                     S1[p[0]] = s

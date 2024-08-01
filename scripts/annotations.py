@@ -39,10 +39,7 @@ def get_annotations(fname, t1, t2, cls=None):
         )
     return anns
 
-def has_class(fname, t1, t2, cls):
-    anns = get_annotations(fname, t1, t2)
-    anns = list(filter(lambda x: x['class'] == cls), anns)
-    return len(anns) > 0
+
 
 if __name__ == "__main__":
     import os
