@@ -2,8 +2,8 @@ from config import PROCESSED_DATASET_PATH
 
 import load_path
 
-from sepws.scattering.separable_scattering import SeparableScattering
-from sepws.scattering.config import cfg
+from scattering.scattering import Scattering1D
+from scattering.config import cfg
 
 from scipy.signal import decimate
 from scipy.io.wavfile import read, write
@@ -20,6 +20,29 @@ from scipy.signal import stft
 
 from parameters import BM_ANT_PARAMETERS, BM_D_PARAMETERS
 
+def sp_to_s1_s2(Sp, L, allow_ds = False, padding = 0, d = 1, same_signal_batches = True):
+    S1 = {}
+    S2 = {}
+    for p in Sp.keys():
+            # print(p)
+            s: Tensor = Sp[p]
+            N = L//d if allow_ds else L
+            s = s[:, padding:(padding+ N)]
+            if same_signal_batches: s = s.reshape((s.shape[0] * s.shape[1],)).cpu()[:L//d]
+            # print(s.shape)
+            s[s < 0] = 0 # sometimes, floating point error due to FFT convolution with phi can cause it to be slightly smaller than 0, so clamp it!
+            if isinstance(p, (float, int)):
+                if(p != 0): # not interested in S0
+                    S1[p] = s
+            elif len(p) == 2:
+                # additional tuple depth from separable scattering implementation
+                p1 = p[0]
+                p2 = p[1]
+                if p1 not in S2.keys():
+                    S2[p1] = {}
+                S2[p1][p2] = s # more convenient to process than the current format
+    return S1, S2
+
 
 def compute_tf(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
     print(subdir)
@@ -28,7 +51,7 @@ def compute_tf(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
     
     fs = 250 / ds
     f_start = f_start / fs # works with normalised freq
-    ws = SeparableScattering([block_size], [d], [[q] for q in Q], [f_start], allow_ds=allow_ds) #compatibility with sep-ws
+    ws = Scattering1D(block_size, d, Q, f_start, allow_ds=allow_ds) #compatibility with sep-ws
     wav_path = PROCESSED_DATASET_PATH + "/raven/all"
     files = os.listdir(wav_path)
     wav_files = []
@@ -55,27 +78,9 @@ def compute_tf(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
         xb = torch.from_numpy(xb.astype(np.float32)).cuda()
         _, Sp, _, _ = ws._scattering(xb, returnSpath=True) #Sp is a dict such that Sp[p], where p is the lambda path (expressed as tuples) stores the scattering coefficients, with sample frequency 250/ds/d
         padding = 0 if allow_ds else ws.pad[0] # does not unpad if there is no ds
-        S1 = {}
-        S2 = {}
-        for p in Sp.keys():
-            print(p)
-            s: Tensor = Sp[p]
-            N = L//d if allow_ds else L
-            s = s[:, padding:(padding+ N)]
-            s = s.reshape((s.shape[0] * s.shape[1],)).cpu()
-            s[s < 0] = 0 # sometimes, floating point error due to FFT convolution with phi can cause it to be slightly smaller than 0, so clamp it!
-            if len(p) == 1:
-                if(p[0] != 0): # not interested in S0
-                    S1[p[0]] = s
-            elif len(p) == 2:
-                # additional tuple depth from separable scattering implementation
-                p1 = p[0][0]
-                p2 = p[1][0]
-                if p1 not in S2.keys():
-                    S2[p1] = {}
-                S2[p1][p2] = s # more convenient to process than the current format
+        S1, _ = sp_to_s1_s2(Sp, L, allow_ds, padding)
         with open(f'tmp/{subdir}/ws/{fname}.pkl', 'wb') as pickle_file:
-            pkl.dump((S1, S2), pickle_file)
+            pkl.dump(S1, pickle_file)
             
         # STFT
         # configured such that the TF decomposition is equivalent to the WS configuration in terms of output frequency with half-overlapping windows
@@ -89,16 +94,16 @@ def compute_tf(ds, block_size, Q, d, f_start, subdir, allow_ds=True):
 if __name__ == '__main__':
         
     # Bm-Ant calls
-    Q = [BM_ANT_PARAMETERS.Q1, BM_ANT_PARAMETERS.Q2]
-    d = BM_ANT_PARAMETERS.d
+    Q = [BM_ANT_PARAMETERS.Q1_det]
+    d = BM_ANT_PARAMETERS.d_det
     d_audio = BM_ANT_PARAMETERS.d_audio
     fmin = BM_ANT_PARAMETERS.f0
     compute_tf(d_audio, 2**15, Q, d, fmin, 'bm-ant')
     # compute_tf(3, 2**15, [8, 4], 64, 15, 'bm-ant-no-ds', False) #for plots
 
     # Bm-D calls  
-    Q = [BM_D_PARAMETERS.Q1, BM_D_PARAMETERS.Q2]
-    d = BM_D_PARAMETERS.d
+    Q = [BM_D_PARAMETERS.Q1_det]
+    d = BM_D_PARAMETERS.d_det
     d_audio = BM_D_PARAMETERS.d_audio
     fmin = BM_D_PARAMETERS.f0
     compute_tf(d_audio, 2**15, Q, d, fmin, 'bm-d')

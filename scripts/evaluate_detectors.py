@@ -29,7 +29,7 @@ def iteration(thresholds: Dict, iter_num = None):
         T_stats = {}
         for (X_ws, annotations), (X_stft, _) in zip(l_ws, l_stft):
             # audio and TF sample frequency
-            fs_tf = params.fs_tf
+            fs_tf = params.fs_tf_det
             
             # adaptive whitening params
             Mf = params.Mf  
@@ -37,7 +37,7 @@ def iteration(thresholds: Dict, iter_num = None):
             Mt = params.Mt
             
             # TF decompositions (magnitude), the detectors will square if needed
-            tf_ws = s1_to_tf(X_ws[0])
+            tf_ws = s1_to_tf(X_ws)
             tf_stft = torch.from_numpy(X_stft[2].astype(np.float32))  
             
             # STFT parameters - signal band limits
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                 'gpl_stft'      :    exp_spacing (bm_d_stats['gpl_stft'      ][0], bm_d_stats['gpl_stft'      ][1]/2),
                 'gpl_ws'        :    exp_spacing (bm_d_stats['gpl_ws'        ][0], bm_d_stats['gpl_ws'        ][1]/2),
                 'nuttall'       :    exp_spacing (bm_d_stats['nuttall'       ][0], bm_d_stats['nuttall'       ][1]/2),
-                'nuttall_aw'    :    exp_spacing (bm_d_stats['nuttall_aw'    ][0], bm_d_stats['nuttall_aw'    ][1]/2),
+                'nuttall_aw'    :    exp_spacing (bm_d_stats['nuttall_aw'    ][0]*2, bm_d_stats['nuttall_aw'    ][1]/4),
                 'proposed_stft' :    exp_spacing (0.3                            , 0.005                            ),
                 'proposed_ws'   :    exp_spacing (0.3                            , 0.005                            ),
                 'se_stft'       :    even_spacing(bm_d_stats['se_stft'       ][0], bm_d_stats['se_stft'       ][1]/2),

@@ -12,47 +12,58 @@ import json
 from tqdm import tqdm
 from typing import List
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from annotations import get_random_annotation
+from scattering.scattering import Scattering1D
+from scipy.stats.distributions import chi2
+from scattering.config import cfg
 
 
-def classify_trial(X: np.ndarray, y: List[int], n_calls, prop_noise_to_calls):
-    y = np.array(y)
-    n_noise = int(n_calls * prop_noise_to_calls)
-    y_cls_idx = np.nonzero(y == 1)[0]
-    np.random.shuffle(y_cls_idx)
-    y_noise_idx = np.nonzero(y == 0)[0]
-    np.random.shuffle(y_noise_idx)
-    train_idx = np.concatenate([y_cls_idx[0:n_calls], y_noise_idx[0:n_noise]], axis=0)
-    test_idx = np.concatenate([y_cls_idx[n_calls:], y_noise_idx[n_noise:]], axis=0)
-    X_train, y_train = X[train_idx, :], y[train_idx]
-    X_test, y_test = X[test_idx, :], y[test_idx]
+def classify_trial(X: np.ndarray, y, n_calls, cls, ws: Scattering1D, params: Parameters, fname):
+    example_call_times = []
+    example_call_files = []
+    for _ in range(n_calls):
+        t1, t2, example_call_file = get_random_annotation(cls)
+        example_call_times.append((t1, t2))
+        example_call_files.append(example_call_file)
     
-    mu = np.median(X_train, axis=0)
-    sigma = np.median(np.abs(X_train - mu), axis=0)
-    sigma[sigma == 0] = 1.0
+    X_train, _ = compute_features(example_call_times, ws, params, example_call_files)
     
-    X_train = (X_train - mu)/sigma
-    X_test = (X_test - mu)/sigma
+    gamma = params.gamma_clf
+    rho = params.rho_clf
     
-    clf = LDA(solver='eigen', shrinkage='auto', priors=[0.5, 0.5])
+    mu = np.mean(X_train, axis=1, keepdims=True)
+    Sigma_hat = np.cov(X_train, bias=False)
+    Sigma_reg = (1 - gamma) * Sigma_hat + gamma * np.diag(np.diag(Sigma_hat))
+    X_mu = X - mu
     
-    clf.fit(X_train, y_train)
-    y_pred = clf.predict(X_test)
+    n = X_mu.shape[1]
+    m = X_mu.shape[0]
     
-    tp = np.sum((y_pred == 1) & (y_test == 1))
-    tn = np.sum((y_pred == 0) & (y_test == 0))
-    fp = np.sum((y_pred == 1) & (y_test == 0))
-    fn = np.sum((y_pred == 0) & (y_test == 1))
+    D_m = np.zeros(shape=(n,))
+    Sigma_reg_inv = np.linalg.inv(Sigma_reg)
+    for n in range(n):
+        xn = X_mu[:, [n]]
+        D_m[n] = (xn.T @ Sigma_reg_inv @ xn).item() # Mahalanobis distance
+    
+    D_m_crit = chi2.ppf(1 - rho, df=m) # critical distance value, df = number of features
+
+    
+    y_pred = (D_m < D_m_crit).astype(np.uint)
+    
+    tp = np.sum((y_pred == 1) & (y == 1))
+    tn = np.sum((y_pred == 0) & (y == 0))
+    fp = np.sum((y_pred == 1) & (y == 0))
+    fn = np.sum((y_pred == 0) & (y == 1))
     
     return tp, tn, fp, fn
     
 
 
-def iteration(n_calls, thresh, N_trails = 100):
-    ant_ws = loader.bm_ant_ws_loader()
-    
+def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails = 50):
+    ant_ws = loader.bm_ant_ws_loader()    
     d_ws = loader.bm_d_ws_loader()
     
-    def iteration_cls(params: Parameters, l_ws: loader.Loader, prop_noise_to_calls = 2.0):
+    def iteration_cls(params: Parameters, l_ws: loader.Loader, ws: Scattering1D):
         
         # prepare the data
         X = []
@@ -60,9 +71,9 @@ def iteration(n_calls, thresh, N_trails = 100):
         
         NT, NDET, NANN = 0, 0, 0
         
-        for ((S1, S2), annotations) in l_ws:
+        for (S1, annotations) in l_ws:
             tf_ws = s1_to_tf(S1) 
-            fs_tf = params.fs_tf
+            fs_tf = params.fs_tf_det
             
             # SE parameters
             Mh = params.Mh       
@@ -90,8 +101,8 @@ def iteration(n_calls, thresh, N_trails = 100):
             NANN += Nann
             
             # gather the features of each detection
-            x, y = compute_features(S1, S2, det_idx, params, l_ws.get_current_fname())
-            if x != None: 
+            x, y = compute_features(detections, ws, params, l_ws.get_current_fname()) # returns m x n feature matrix and the labels
+            if not x is None: 
                 X.append(x)
                 Y.extend(y) # y will remain a list, not a tensor
         
@@ -103,26 +114,27 @@ def iteration(n_calls, thresh, N_trails = 100):
                 'thresh': thresh,
                 'n_calls': n_calls
                 }
-        X = torch.concat(X, dim=0).numpy()
+        X = np.concatenate(X, axis=1)
+        Y = np.array(Y)
         
         # print(params.cls)
         # now, perform classification in a number of randomised trails
         results = []
-        for i in range(N_trails):
-            r = classify_trial(X, Y, n_calls, prop_noise_to_calls)
+        for i in tqdm(range(N_trails)):
+            r = classify_trial(X, Y, n_calls, l_ws.cls, ws, params, l_ws.get_current_fname())
             results.append(r)
             
         
-        mu = np.array(results).mean(axis=0).tolist() #[tp tn fp fn]
+        mu = np.median(np.array(results), axis=0).tolist() #[tp tn fp fn]
         sigma = np.array(results).std(axis=0).tolist()
         Nt_clf = mu[0] #true positives
         Ndet_clf = mu[0] + mu[2] #true positives + false positives, since we no discard the output where the classifier rejected the detections
-        Nann_clf = NANN - n_calls # we used some calls for the training, so take them away!
+        Nann_clf = NANN # we tested on all calls
         
         prec_orig, reca_orig = calc_prec_rec(NT, NDET, NANN)
         prec_clf, reca_clf = calc_prec_rec(Nt_clf, Ndet_clf, Nann_clf)
         fpph_orig = calc_fp_ph(NT, NDET, NANN)
-        fpph_clf = calc_fp_ph(Nt_clf, Ndet_clf, Nann_clf, n_hours=19*(Nann_clf/NANN))
+        fpph_clf = calc_fp_ph(Nt_clf, Ndet_clf, Nann_clf, n_hours=19)
         
         return {
                 'prec_orig': prec_orig,
@@ -136,26 +148,32 @@ def iteration(n_calls, thresh, N_trails = 100):
                 }
            
             
-    bma = iteration_cls(BM_ANT_PARAMETERS, ant_ws) 
-    bmd = iteration_cls(BM_D_PARAMETERS, d_ws)
+    bma = iteration_cls(BM_ANT_PARAMETERS, ant_ws, ws_a) 
+    bmd = iteration_cls(BM_D_PARAMETERS, d_ws, ws_d)
     return bma, bmd
                 
 
 if __name__ == "__main__":
     
-    n_calls = [10, 25, 50]  
+    n_calls = [20]  
     N = 50
     exp_spacing = lambda low, high: np.exp(np.linspace(np.log(low), np.log(high), N)).tolist()
     thresh = exp_spacing(0.3, 0.005)
     # thresh = [0.05]
     # print(thresh)     
     
+    cfg.cuda()
+    p = BM_ANT_PARAMETERS
+    ws_a = Scattering1D(p.N_clf_win, p.d_clf, [p.Q1_clf, p.Q2_clf], startfreq=p.f0 / p.fs_audio)
+    p = BM_D_PARAMETERS
+    ws_d = Scattering1D(p.N_clf_win, p.d_clf, [p.Q1_clf, p.Q2_clf], startfreq=p.f0 / p.fs_audio)
+    
     results_a = []
     results_d = []
     for t in tqdm(thresh):
         for n in n_calls:
             # print(n)
-            a, d = iteration(n, t)
+            a, d = iteration(n, t, ws_a, ws_d)
             results_a.append(a)
             results_d.append(d)
         
