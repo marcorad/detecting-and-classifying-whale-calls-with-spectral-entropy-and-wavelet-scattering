@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.patches import Polygon
 import json
 
 plt.style.use('fast')
@@ -54,12 +55,10 @@ def get_clf_df(name):
     records = []
     fname = f'results/bm_{name}_clf_results.json'
     df = pd.read_json(fname, orient='records')
-    df = df.groupby('thresh').mean().reset_index()
-    print(df)
-    return df
+    return df.groupby('thresh').mean().reset_index(), df.groupby('thresh').std().reset_index()
     
 
-def plot_prec_reca_multiple(lims, df: pd.DataFrame, config: dict):
+def plot_prec_reca_multiple(lims, df: pd.DataFrame, config: dict, show_leg):
     dets = df['detector'].unique().tolist()
     ax: Axes
     fig: Figure
@@ -79,13 +78,14 @@ def plot_prec_reca_multiple(lims, df: pd.DataFrame, config: dict):
         if len(df_det) > 15:
             df_det = df_det.iloc[1::3]
         plot_prec_reca(ax, df_det['prec'], df_det['reca'], index=config[det]['index'], dashed=config[det]['dashed'])
-    ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25),
-          ncol=max(len(leg)//4, 1), fancybox=True, shadow=True)
-    
+    if show_leg:
+        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25),
+            ncol=max(len(leg)//4, 1), fancybox=True, shadow=True)
+        
     box = ax.get_position()
     ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
     
-def plot_fpph_reca_multiple(lims, df: pd.DataFrame, config: dict):
+def plot_fpph_reca_multiple(lims, df: pd.DataFrame, config: dict, show_leg):
     dets = df['detector'].unique().tolist()
     ax: Axes
     fig: Figure
@@ -105,11 +105,12 @@ def plot_fpph_reca_multiple(lims, df: pd.DataFrame, config: dict):
         if len(df_det) > 15:
             df_det = df_det.iloc[1::3]
         plot_fpph_reca(ax, df_det['fpph'], df_det['reca'], index=config[det]['index'], dashed=config[det]['dashed'])
-    ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25),
-          ncol=max(len(leg)//4, 1), fancybox=True, shadow=True)
-    
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
+    if show_leg:
+        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25),
+            ncol=max(len(leg)//4, 1), fancybox=True, shadow=True)
+        
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
 
 def plot_detector_results(name, lims):
     df = get_detector_df(name)
@@ -155,35 +156,44 @@ def plot_detector_results(name, lims):
                 'index': 3
             },
         }
-    plot_prec_reca_multiple(lims, df, config)
+    plot_prec_reca_multiple(lims, df, config, name=='a')
     
     
 def plot_clf_results(name, prec_lim, reca_lim, fpph_lim):
-    df = get_clf_df(name)
+    df, df_std = get_clf_df(name)
     
     
     leg = ["Proposed (WS)", "Proposed (WS) + Classifier"]
     
-    ax: Axes
-    fig: Figure
-    fig, ax = plt.subplots()
-    fig.set_size_inches(4, 3)   
-    plot_prec_reca(ax, df['prec_orig'], df['reca_orig'], 0, True)
-    plot_prec_reca(ax, df['prec_clf'], df['reca_clf'], 1, False)
+    # ax: Axes
+    # fig: Figure
+    # fig, ax = plt.subplots()
+    # fig.set_size_inches(4, 3)   
+    # plot_prec_reca(ax, df['prec_orig'], df['reca_orig'], 0, False)
+    # # plot_prec_reca(ax, df['prec_clf'], df['reca_clf'], 1, False)
+    # p1 = [[r,p] for r, p in zip(df['reca_clf'], df['prec_clf'] + df_std['prec_clf'])]
+    # p2 = [[r,p] for r, p in zip(df['reca_clf'], df['prec_clf'] - df_std['prec_clf'])]
+    # p2.reverse()
+    # ax.add_patch(Polygon(p1 + p2, hatch='///', edgecolor='k')) 
     
-    # ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
-    box = ax.get_position()
+    # # ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
+    # box = ax.get_position()
     # ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
         
     # df = df[(df['fpph_orig'] < fpph_lim) & (df['fpph_clf'] < fpph_lim)]
     ax: Axes
     fig: Figure
     fig, ax = plt.subplots()
-    fig.set_size_inches(4, 3)
-    plot_fpph_reca(ax, df['fpph_orig'], df['reca_orig'], 0, True)
-    plot_fpph_reca(ax, df['fpph_clf'], df['reca_clf'], 1, False)
-    # ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
-    box = ax.get_position()
+    fig.set_size_inches(5, 4)
+    plot_fpph_reca(ax, df['fpph_orig'], df['reca_orig'], 0, False)
+    p1 = [[f,p] for f, p in zip(df['fpph_clf'], df['reca_clf'] + df_std['reca_clf'])]
+    p2 = [[f,p] for f, p in zip(df['fpph_clf'], df['reca_clf'] - df_std['reca_clf'])]
+    p2.reverse()
+    ax.add_patch(Polygon(p1 + p2, hatch='///', edgecolor='k')) 
+    # plot_fpph_reca(ax, df['fpph_clf'], df['reca_clf'], 1, False)
+    if name == 'a':
+        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
+    # box = ax.get_position()
     # ax.set_xlim([0, fpph_lim])
     # ax.set_ylim(None)
     # ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
@@ -193,8 +203,8 @@ def plot_clf_results(name, prec_lim, reca_lim, fpph_lim):
 # print(bma_res.head())
 
 
-# plot_detector_results('a', lims=[0.25, 0.25])
-# plot_detector_results('d', lims=[0.1, 0.05])
+plot_detector_results('a', lims=[0.25, 0.25])
+plot_detector_results('d', lims=[0.1, 0.05])
 
 plot_clf_results('a', 0.25, 0.25, 10)
 plot_clf_results('d', 0.25, 0.25, 10)
