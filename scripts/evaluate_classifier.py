@@ -16,58 +16,74 @@ from annotations import get_random_annotation
 from scattering.scattering import Scattering1D
 from scipy.stats.distributions import chi2
 from scattering.config import cfg
+from annotations import get_annotations
 
 
-def classify_trial(X: np.ndarray, y, n_calls, cls, ws: Scattering1D, params: Parameters, fname):
-    example_call_times = []
-    example_call_files = []
-    for _ in range(n_calls):
-        t1, t2, example_call_file = get_random_annotation(cls)
-        example_call_times.append((t1, t2))
-        example_call_files.append(example_call_file)
+class MahalonobisOneClass:
+    def __init__(self, ws: Scattering1D) -> None:
+        self.ws = ws
     
-    X_train, _ = compute_features(example_call_times, ws, params, example_call_files)
+    def fit(self, n_calls, params: Parameters):
+        example_call_times = []
+        example_call_files = []
+        for _ in range(n_calls):
+            t1, t2, example_call_file = get_random_annotation(params.cls)
+            example_call_times.append((t1, t2))
+            example_call_files.append(example_call_file)
+        
+        X_train, _ = compute_features(example_call_times, self.ws, params, example_call_files)
+        
+        gamma = params.gamma_clf
+        rho = params.rho_clf
+        
+        mu = np.mean(X_train, axis=1, keepdims=True)
+        Sigma_hat = np.cov(X_train, bias=False)
+        Sigma_reg = (1 - gamma) * Sigma_hat + gamma * np.diag(np.diag(Sigma_hat))
+        X_mu_train = X_train - mu
+        
+        Sigma_reg_inv = np.linalg.inv(Sigma_reg)
+        self.mu = mu
+        self.Sigma_reg_inv = Sigma_reg_inv       
+        
+        D_m_train = np.zeros(shape=(n_calls,))
+        for n in range(n_calls):
+            xn = X_mu_train[:, [n]]
+            D_m_train[n] = (xn.T @ Sigma_reg_inv @ xn).item() # Mahalanobis distance
+        
+        m = X_mu_train.shape[0]
+        self.D_m_crit = chi2.ppf(1 - rho, df=m) # critical distance value, df = number of features
+        print("Train", self.D_m_crit, D_m_train.min(), D_m_train.max())
+        # self.D_m_crit = D_m_train.mean() * rho # critical distance value, df = number of features
+        
+    def predict(self, X):
+        X_mu = X - self.mu
+        n = X_mu.shape[1]
+        
+        
+        D_m = np.zeros(shape=(n,))
+        for n in range(n):
+            xn = X_mu[:, [n]]
+            D_m[n] = (xn.T @ self.Sigma_reg_inv @ xn).item() # Mahalanobis distance
+        print(D_m.min())
+        y_pred = (D_m < self.D_m_crit).astype(np.uint)
+        idx: np.ndarray = np.nonzero(y_pred)[0]
+        return idx.tolist()
     
-    gamma = params.gamma_clf
-    rho = params.rho_clf
-    
-    mu = np.mean(X_train, axis=1, keepdims=True)
-    Sigma_hat = np.cov(X_train, bias=False)
-    Sigma_reg = (1 - gamma) * Sigma_hat + gamma * np.diag(np.diag(Sigma_hat))
-    X_mu = X - mu
-    
-    n = X_mu.shape[1]
-    m = X_mu.shape[0]
-    
-    D_m = np.zeros(shape=(n,))
-    Sigma_reg_inv = np.linalg.inv(Sigma_reg)
-    for n in range(n):
-        xn = X_mu[:, [n]]
-        D_m[n] = (xn.T @ Sigma_reg_inv @ xn).item() # Mahalanobis distance
-    
-    D_m_crit = chi2.ppf(1 - rho, df=m) # critical distance value, df = number of features
 
-    
-    y_pred = (D_m < D_m_crit).astype(np.uint)
-    
-    tp = np.sum((y_pred == 1) & (y == 1))
-    tn = np.sum((y_pred == 0) & (y == 0))
-    fp = np.sum((y_pred == 1) & (y == 0))
-    fn = np.sum((y_pred == 0) & (y == 1))
-    
-    return tp, tn, fp, fn
-    
 
-
-def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails = 50):
+def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D):
     ant_ws = loader.bm_ant_ws_loader()    
     d_ws = loader.bm_d_ws_loader()
     
     def iteration_cls(params: Parameters, l_ws: loader.Loader, ws: Scattering1D):
         
         # prepare the data
+        fp_train = []
         X = []
-        Y = []
+        X_train = []
+        y_train = []
+        all_detections = []
+        all_files = []
         
         NT, NDET, NANN = 0, 0, 0
         
@@ -87,13 +103,24 @@ def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails 
             # Detection parameters
             Tmin = params.Tmin
             Tmax = params.Tmax
-            Text = 0 # we do not want to extend boundaries, since we have clf windows            
+            Text = 0  
+            
+            # get the random annotated calls from this file
+            if len(annotations) >= n_calls:
+                ann_train = [annotations[i] for i in np.random.choice(np.arange(len(annotations)), replace=False, size=n_calls)]
+                times = [(a['t_start'], a['t_end']) for a in ann_train]
+                x, _ = compute_features(times, ws, params, l_ws.get_current_fname())    
+                X_train.append(x)
+                y_train.extend([1]*n_calls)  
             
             # run the detector to find calls
             proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh, t_dim=1, f_dim=0, kappa=params.kappa)
             
             T = proposed_ws.apply(tf_ws)
             detections, det_idx = det.get_detections(T, 0.5, Tmin, Tmax, Text, fs_tf)
+            
+            all_detections.extend(detections)
+            all_files.extend([l_ws.get_current_fname()] * len(detections))
             
             Nt, Ndet, Nann = prec_reca_counts(detections, annotations)
             NT += Nt
@@ -104,38 +131,45 @@ def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails 
             x, y = compute_features(detections, ws, params, l_ws.get_current_fname()) # returns m x n feature matrix and the labels
             if not x is None: 
                 X.append(x)
-                Y.extend(y) # y will remain a list, not a tensor
-        
-        if len(X) == 0: return {
-                'prec_orig': 0,
-                'reca_orig': 0,
-                'prec_cls': 0,
-                'reca_cls': 0,
-                'thresh': thresh,
-                'n_calls': n_calls
-                }
+                # now get an equal number of counter examples
+                fp_idx = (np.array(y) == 0).nonzero()[0]
+                if len(fp_idx) >= n_calls:
+                    fp_idx = np.random.choice(fp_idx, size=n_calls, replace=False).tolist()
+                    X_train.append(x[:, fp_idx])
+                    y_train.extend([0]*n_calls)
+              
+
         X = np.concatenate(X, axis=1)
-        Y = np.array(Y)
+        X_train = np.concatenate(X_train, axis=1)
+        # train a classifier to accept or reject a detection based on the training data gathered from each file
+        clf = LDA(solver='eigen', shrinkage='auto', priors=[0.5, 0.5])
+        clf.fit(X_train.T, y_train)
+        y_pred = clf.predict(X.T)
         
-        # print(params.cls)
-        # now, perform classification in a number of randomised trails
-        results = []
-        for i in tqdm(range(N_trails)):
-            r = classify_trial(X, Y, n_calls, l_ws.cls, ws, params, l_ws.get_current_fname())
-            results.append(r)
+        # get the files for each detection
+        clf_idx = y_pred.nonzero()[0].tolist()
+        clf_detections = [all_detections[i] for i in clf_idx]
+        clf_files = [all_files[i] for i in clf_idx]
+        clf_output = {}
+        for fname, d in zip(clf_files, clf_detections):
+            if fname not in clf_output:
+                clf_output[fname] = []
+            clf_output[fname].append(d)
+        # now evaluate the clf detections per file        
+        Nt_clf, Ndet_clf = 0, 0
+        for fname, dets in clf_output.items():
+            Nt, Ndet, _ = prec_reca_counts(dets, get_annotations(fname, 0, 10e6, params.cls))
+            Nt_clf += Nt
+            Ndet_clf += Ndet
             
-        
-        mu = np.median(np.array(results), axis=0).tolist() #[tp tn fp fn]
-        sigma = np.array(results).std(axis=0).tolist()
-        Nt_clf = mu[0] #true positives
-        Ndet_clf = mu[0] + mu[2] #true positives + false positives, since we no discard the output where the classifier rejected the detections
-        Nann_clf = NANN # we tested on all calls
-        
+                
         prec_orig, reca_orig = calc_prec_rec(NT, NDET, NANN)
-        prec_clf, reca_clf = calc_prec_rec(Nt_clf, Ndet_clf, Nann_clf)
+        prec_clf, reca_clf = calc_prec_rec(Nt_clf, Ndet_clf, NANN)
         fpph_orig = calc_fp_ph(NT, NDET, NANN)
-        fpph_clf = calc_fp_ph(Nt_clf, Ndet_clf, Nann_clf, n_hours=19)
+        fpph_clf = calc_fp_ph(Nt_clf, Ndet_clf, NANN)
         
+        N_noise = (NDET - NT)
+    
         return {
                 'prec_orig': prec_orig,
                 'reca_orig': reca_orig,
@@ -145,6 +179,8 @@ def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails 
                 'n_calls': n_calls,
                 'fpph_orig': fpph_orig,
                 'fpph_clf': fpph_clf,
+                'clf_tp_acc': reca_clf/reca_orig, #probability of accepting TP
+                'pct_rejected': (NDET - Ndet_clf)/NDET, #rejected samples
                 }
            
             
@@ -155,11 +191,11 @@ def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D, N_trails 
 
 if __name__ == "__main__":
     
-    n_calls = [20]  
-    N = 50
-    exp_spacing = lambda low, high: np.exp(np.linspace(np.log(low), np.log(high), N)).tolist()
-    thresh = exp_spacing(0.3, 0.005)
-    # thresh = [0.05]
+    n_calls = 3 
+    N_trials = 10
+    exp_spacing = lambda low, high: np.exp(np.linspace(np.log(low), np.log(high), 10)).tolist()
+    thresh = exp_spacing(0.25, 0.01)
+    # thresh = [0.08]
     # print(thresh)     
     
     cfg.cuda()
@@ -170,13 +206,13 @@ if __name__ == "__main__":
     
     results_a = []
     results_d = []
-    for t in tqdm(thresh):
-        for n in n_calls:
-            # print(n)
-            a, d = iteration(n, t, ws_a, ws_d)
+    for t in thresh:
+        print(t)
+        for _ in tqdm(range(N_trials)):
+            a, d = iteration(n_calls, t, ws_a, ws_d)
             results_a.append(a)
             results_d.append(d)
-        
+    
     with open('results/bm_a_clf_results.json', 'w') as file:
         json.dump(results_a, file, indent=4)
     with open('results/bm_d_clf_results.json', 'w') as file:

@@ -91,6 +91,7 @@ def _compute_ws_features(S1, S2, params: Parameters) -> Tensor:
 
     if params.log_scattering_coeffs: s1_tf = torch.log(s1_tf + params.eps)  
     if params.scattering_dct: s1_tf = Tensor(dct(s1_tf.cpu().numpy(), axis=-1)) # last dimension is indexed by lambda1
+    if params.time_dct: s1_tf = Tensor(dct(s1_tf.cpu().numpy(), axis=1)) # last dimension is indexed by lambda1
     
     # transform s2 coeffs
     s2_tfs = []
@@ -106,6 +107,7 @@ def _compute_ws_features(S1, S2, params: Parameters) -> Tensor:
             
             if params.log_scattering_coeffs: s2_tf = torch.log(s2_tf + params.eps)   
             if params.scattering_dct: s2_tf = Tensor(dct(s2_tf.cpu().numpy(), axis=-1)) # last dimension is indexed by lambda2
+            if params.time_dct: s2_tf = Tensor(dct(s2_tf.cpu().numpy(), axis=1)) # last dimension
             s2_tfs.append(s2_tf)   
                      
     # create feature matrix    

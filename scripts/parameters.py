@@ -41,11 +41,12 @@ class Parameters(BaseModel):
     Q1_clf: float
     Q2_clf: float
     T_clf_win: float
-    normalise_s2: bool = True # whether to normalise scattering level 2 as s2 / s1 
+    normalise_s2: bool = False # whether to normalise scattering level 2 as s2 / s1 
     log_scattering_coeffs: bool = True # whether to use the logarithm of scattering coeffs
     eps: float = 1e-12 # numerical safety when taking the logarithm of the scattering coeffs
     scattering_dct: bool = True # whether to take the DCT of the coeffs (after log and normalisation)
-    normalise_clf_audio: bool = False
+    normalise_clf_audio: bool = True
+    time_dct: bool = False
     gamma_clf: float =  0.8
     rho_clf: float = 0.0001   
     
@@ -92,30 +93,6 @@ class Parameters(BaseModel):
     
         
         
-    
-    
-    
-BM_D_PARAMETERS = Parameters(
-    cls = 'D',
-    d_det=32, # 128 ms
-    d_audio=1, # 250 Hz sampling rate
-    f0=35,
-    f1=120,
-    Tmin=2,
-    Tmax=7,
-    Th=0.75,
-    Q1_det=12,
-    Mf = 1,
-    Tn = 60*5,
-    Tt = 0.5,
-    
-    d_clf=256,
-    Q1_clf=2,
-    Q2_clf=1,
-    T_clf_win=8,
-    rho_clf = 0.0001,
-    gamma_clf =  0.9
-)
 
 BM_ANT_PARAMETERS = Parameters(
     cls = 'A',
@@ -132,10 +109,34 @@ BM_ANT_PARAMETERS = Parameters(
     Tn = 60*10,
     Tt = 2.0,
     
-    d_clf=256,
+    d_clf=512,
     Q1_clf=4,
     Q2_clf=2,
-    T_clf_win=12,
-    rho_clf = 0.0001,
-    gamma_clf =  0.9
+    T_clf_win=9,
+    rho_clf = 0.1,
+    gamma_clf =  0.5,
+)    
+    
+
+   
+BM_D_PARAMETERS = Parameters(
+    cls = 'D',
+    d_det=32, # 128 ms
+    d_audio=1, # 250 Hz sampling rate
+    f0=35,
+    f1=120,
+    Tmin=2,
+    Tmax=7,
+    Th=0.75,
+    Q1_det=12,
+    Mf = 1,
+    Tn = 60*5,
+    Tt = 0.5,
+    
+    d_clf=512,
+    Q1_clf=2,
+    Q2_clf=1,
+    T_clf_win=5,
+    rho_clf = 0.01,
+    gamma_clf =  0.5
 )

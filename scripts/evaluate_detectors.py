@@ -62,29 +62,30 @@ def iteration(thresholds: Dict, iter_num = None):
             
             # Baseline SE, with no modifications
             se_stft = det.se(k0_stft, k1_stft, t_dim=1, f_dim=0)
+            se_ws = det.se(0, K_ws-1, t_dim=1, f_dim=0)
             
             # GPL
             gpl_stft = det.helble_gpl(k0 = k0_stft, k1=k1_stft, t_dim=1, f_dim=0)
             gpl_ws = det.helble_gpl(k0 = 0, k1=K_ws-1, t_dim=1, f_dim=0)
             
             # Nuttall
-            nuttall = det.nuttall(k0_stft, k1_stft, t_dim=1, f_dim=0)
-            nuttall_aw = det.aw_nuttall(k0_stft, k1_stft, Mf, Mt, Mn, t_dim=1, f_dim=0)   
+            # nuttall = det.nuttall(k0_stft, k1_stft, t_dim=1, f_dim=0)
+            nuttall_aw_stft = det.aw_nuttall(k0_stft, k1_stft, Mf, Mt, Mn, t_dim=1, f_dim=0)   
+            nuttall_aw_ws = det.aw_nuttall(0, K_ws - 1, Mf, Mt, Mn, t_dim=1, f_dim=0)   
             
             # BLED
-            bled = det.bled(k0_stft, k1_stft, t_dim=1, f_dim=0)
-            bled_aw = det.aw_bled(k0_stft, k1_stft, Mf, Mt, Mn, t_dim=1, f_dim=0)
+            # bled = det.bled(k0_stft, k1_stft, t_dim=1, f_dim=0)
+            # bled_aw = det.aw_bled(k0_stft, k1_stft, Mf, Mt, Mn, t_dim=1, f_dim=0)
             
             detectors: Dict[str, det.DetectorChain] = {
-                'proposed_stft': proposed_stft,
-                'proposed_ws': proposed_ws,
-                'se_stft': se_stft,
-                'gpl_stft': gpl_stft,
-                'gpl_ws': gpl_ws,
-                'nuttall': nuttall,
-                'nuttall_aw': nuttall_aw,
-                'bled': bled,
-                'bled_aw': bled_aw,
+                'proposed_stft':        proposed_stft,
+                'proposed_ws':          proposed_ws,
+                'se_stft':              se_stft,
+                'se_ws':                se_ws,
+                'gpl_stft':             gpl_stft,
+                'gpl_ws':               gpl_ws,
+                'nuttall_aw_stft':      nuttall_aw_stft,
+                'nuttall_aw_ws':        nuttall_aw_ws,
             }         
             
             # counts all the detections across all files
@@ -129,15 +130,14 @@ def iteration(thresholds: Dict, iter_num = None):
 
 if __name__ == "__main__":
     t = {
-                'proposed_stft': 0.05,
-                'proposed_ws': 0.05,
-                'se_stft': 0,
-                'gpl_stft': 0,
-                'gpl_ws': 0,
-                'nuttall': 0,
-                'nuttall_aw': 0,
-                'bled': 0,
-                'bled_aw': 0,
+                'proposed_stft':      0.1,  
+                'proposed_ws':        0.1,  
+                'se_stft':            0.1,  
+                'se_ws':              0.1,  
+                'gpl_stft':           0.1,  
+                'gpl_ws':             0.1,  
+                'nuttall_aw_stft':    0.1,  
+                'nuttall_aw_ws':      0.1,  
             } 
     
     bm_a_stats, bm_d_stats = iteration(t) # will return the min, max, mean stats
@@ -150,26 +150,24 @@ if __name__ == "__main__":
     # automatically choose
     thresholds = {
         'A': {
-                'bled'          :    exp_spacing (bm_a_stats['bled'          ][0], bm_a_stats['bled'          ][1]/2),
-                'bled_aw'       :    exp_spacing (bm_a_stats['bled_aw'       ][0], bm_a_stats['bled_aw'       ][1]/2),
-                'gpl_stft'      :    exp_spacing (bm_a_stats['gpl_stft'      ][0], bm_a_stats['gpl_stft'      ][1]/2),
-                'gpl_ws'        :    exp_spacing (bm_a_stats['gpl_ws'        ][0], bm_a_stats['gpl_ws'        ][1]/2),
-                'nuttall'       :    exp_spacing (bm_a_stats['nuttall'       ][0], bm_a_stats['nuttall'       ][1]/2),
-                'nuttall_aw'    :    exp_spacing (bm_a_stats['nuttall_aw'    ][0], bm_a_stats['nuttall_aw'    ][1]/2),
-                'proposed_stft' :    exp_spacing (0.3                            , 0.005                            ),
-                'proposed_ws'   :    exp_spacing (0.3                            , 0.005                            ),
-                'se_stft'       :    even_spacing(bm_a_stats['se_stft'       ][0], bm_a_stats['se_stft'       ][1]/2),
+                'gpl_stft'          :    exp_spacing (bm_a_stats['gpl_stft'         ][0], bm_a_stats['gpl_stft'         ][1]/1.8),
+                'gpl_ws'            :    exp_spacing (bm_a_stats['gpl_ws'           ][0], bm_a_stats['gpl_ws'           ][1]/1.8),
+                'nuttall_aw_stft'   :    exp_spacing (bm_a_stats['nuttall_aw_stft'  ][0], bm_a_stats['nuttall_aw_stft'  ][1]/1.8),
+                'nuttall_aw_ws'     :    exp_spacing (bm_a_stats['nuttall_aw_ws'    ][0], bm_a_stats['nuttall_aw_ws'    ][1]/1.8),
+                'proposed_stft'     :    exp_spacing (0.3                               , 0.005                            ),
+                'proposed_ws'       :    exp_spacing (0.3                               , 0.005                            ),
+                'se_stft'           :    even_spacing(bm_a_stats['se_stft'          ][0], bm_a_stats['se_stft'          ][1]/1.8),
+                'se_ws'             :    even_spacing(bm_a_stats['se_ws'            ][0], bm_a_stats['se_ws'            ][1]/1.8),
             },
         'D' : {
-                'bled'          :    exp_spacing (bm_d_stats['bled'          ][0], bm_d_stats['bled'          ][1]/2),
-                'bled_aw'       :    exp_spacing (bm_d_stats['bled_aw'       ][0], bm_d_stats['bled_aw'       ][1]/2),
-                'gpl_stft'      :    exp_spacing (bm_d_stats['gpl_stft'      ][0], bm_d_stats['gpl_stft'      ][1]/2),
-                'gpl_ws'        :    exp_spacing (bm_d_stats['gpl_ws'        ][0], bm_d_stats['gpl_ws'        ][1]/2),
-                'nuttall'       :    exp_spacing (bm_d_stats['nuttall'       ][0], bm_d_stats['nuttall'       ][1]/2),
-                'nuttall_aw'    :    exp_spacing (bm_d_stats['nuttall_aw'    ][0]*2, bm_d_stats['nuttall_aw'    ][1]/4),
-                'proposed_stft' :    exp_spacing (0.3                            , 0.005                            ),
-                'proposed_ws'   :    exp_spacing (0.3                            , 0.005                            ),
-                'se_stft'       :    even_spacing(bm_d_stats['se_stft'       ][0], bm_d_stats['se_stft'       ][1]/2),
+                'gpl_stft'          :    exp_spacing (bm_d_stats['gpl_stft'         ][0], bm_d_stats['gpl_stft'         ][1]/1.8),
+                'gpl_ws'            :    exp_spacing (bm_d_stats['gpl_ws'           ][0], bm_d_stats['gpl_ws'           ][1]/1.8),
+                'nuttall_aw_stft'   :    exp_spacing (bm_d_stats['nuttall_aw_stft'  ][0], bm_d_stats['nuttall_aw_stft'  ][1]/1.8),
+                'nuttall_aw_ws'     :    exp_spacing (bm_d_stats['nuttall_aw_ws'    ][0], bm_d_stats['nuttall_aw_ws'    ][1]/1.8),
+                'proposed_stft'     :    exp_spacing (0.3                               , 0.005                            ),
+                'proposed_ws'       :    exp_spacing (0.3                               , 0.005                            ),
+                'se_stft'           :    even_spacing(bm_d_stats['se_stft'          ][0], bm_d_stats['se_stft'          ][1]/1.8),
+                'se_ws'             :    even_spacing(bm_d_stats['se_ws'            ][0], bm_d_stats['se_ws'            ][1]/1.8),
             }        
     }
         

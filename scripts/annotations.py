@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from config import PROCESSED_DATASET_PATH
+from config import PROCESSED_DATASET_PATH, ORIGINAL_ANNOTATION_SUBSET_FILE
 import math
 import numpy as np
 from typing import Tuple
@@ -14,7 +14,13 @@ ANN_DF = ANN_DF[ANN_DF['View'] == 'Spectrogram 1']
 ANN_DF['Begin Time File (s)'] = ANN_DF['Beg File Samp (samples)'] / 250
 ANN_DF['End Time File (s)'] = ANN_DF['End File Samp (samples)'] / 250
 
-ANN_DF.reset_index(inplace=True, drop=True)
+
+ORIG_ANN_DF : pd.DataFrame = pd.read_csv(ORIGINAL_ANNOTATION_SUBSET_FILE, sep='\t')
+ORIG_ANN_DF = ORIG_ANN_DF[ORIG_ANN_DF['View'] == 'Spectrogram 1']
+ORIG_ANN_DF['Begin Time File (s)'] = ORIG_ANN_DF['Beg File Samp (samples)'] / 250
+ORIG_ANN_DF['End Time File (s)'] = ORIG_ANN_DF['End File Samp (samples)'] / 250
+
+ORIG_ANN_DF.reset_index(inplace=True, drop=True)
 
 def get_annotations(fname, t1, t2, cls=None):
     df: pd.DataFrame = ANN_DF[ANN_DF['Begin File'] == fname]
@@ -58,4 +64,8 @@ if __name__ == "__main__":
     # f_plot = BM_D_NO_DS_PKL_FILES[2]
     # anns = get_annotations(f_plot[:-4], 0, 1e6)
     # print(anns)
-    print(get_random_annotation('D'))
+    # print(get_random_annotation('D'))
+    print("orig")
+    print(ORIG_ANN_DF['From'].value_counts())
+    print("repaired")
+    print(ANN_DF['From'].value_counts())
