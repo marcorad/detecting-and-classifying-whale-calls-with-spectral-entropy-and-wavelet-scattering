@@ -79,11 +79,11 @@ def plot_prec_reca_multiple(lims, df: pd.DataFrame, config: dict, show_leg, name
             df_det = df_det.iloc[1::5]
         plot_prec_reca(ax, df_det['prec'], df_det['reca'], index=config[det]['index'], dashed=config[det]['dashed'])
     if show_leg:
-        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25),
+        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.35),
             ncol=max(len(leg)//4, 1), fancybox=True, shadow=True)
         
     box = ax.get_position()
-    ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*1.0])
+    ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.85])
     return fig
     
 def plot_fpph_reca_multiple(lims, df: pd.DataFrame, config: dict, show_leg):
