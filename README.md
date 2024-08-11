@@ -7,4 +7,4 @@ Resources for paper submitted the Journal of the Acoustical Society of America (
 
 ``scripts/`` contains all scripts and utilities required to produce the results from this paper.
 
-``casey2017subset.tar.gz`` contains the audio data and repaired annotations (along with a RavenPro workspace file) used for evaluation in this paper. You will need to reimport the audio files in the workspace.
+``casey2017subset.tar.gz`` contains the audio data and repaired annotations (along with a RavenPro workspace file) used for evaluation in this paper. You will need to reimport the audio files in the RavenPro workspace.
