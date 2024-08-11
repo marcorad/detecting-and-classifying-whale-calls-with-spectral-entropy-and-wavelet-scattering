@@ -17,57 +17,6 @@ from scattering.scattering import Scattering1D
 from scipy.stats.distributions import chi2
 from scattering.config import cfg
 from annotations import get_annotations
-
-
-class MahalonobisOneClass:
-    def __init__(self, ws: Scattering1D) -> None:
-        self.ws = ws
-    
-    def fit(self, n_calls, params: Parameters):
-        example_call_times = []
-        example_call_files = []
-        for _ in range(n_calls):
-            t1, t2, example_call_file = get_random_annotation(params.cls)
-            example_call_times.append((t1, t2))
-            example_call_files.append(example_call_file)
-        
-        X_train, _ = compute_features(example_call_times, self.ws, params, example_call_files)
-        
-        gamma = params.gamma_clf
-        rho = params.rho_clf
-        
-        mu = np.mean(X_train, axis=1, keepdims=True)
-        Sigma_hat = np.cov(X_train, bias=False)
-        Sigma_reg = (1 - gamma) * Sigma_hat + gamma * np.diag(np.diag(Sigma_hat))
-        X_mu_train = X_train - mu
-        
-        Sigma_reg_inv = np.linalg.inv(Sigma_reg)
-        self.mu = mu
-        self.Sigma_reg_inv = Sigma_reg_inv       
-        
-        D_m_train = np.zeros(shape=(n_calls,))
-        for n in range(n_calls):
-            xn = X_mu_train[:, [n]]
-            D_m_train[n] = (xn.T @ Sigma_reg_inv @ xn).item() # Mahalanobis distance
-        
-        m = X_mu_train.shape[0]
-        self.D_m_crit = chi2.ppf(1 - rho, df=m) # critical distance value, df = number of features
-        print("Train", self.D_m_crit, D_m_train.min(), D_m_train.max())
-        # self.D_m_crit = D_m_train.mean() * rho # critical distance value, df = number of features
-        
-    def predict(self, X):
-        X_mu = X - self.mu
-        n = X_mu.shape[1]
-        
-        
-        D_m = np.zeros(shape=(n,))
-        for n in range(n):
-            xn = X_mu[:, [n]]
-            D_m[n] = (xn.T @ self.Sigma_reg_inv @ xn).item() # Mahalanobis distance
-        print(D_m.min())
-        y_pred = (D_m < self.D_m_crit).astype(np.uint)
-        idx: np.ndarray = np.nonzero(y_pred)[0]
-        return idx.tolist()
     
 
 

@@ -172,26 +172,7 @@ def prob_not_drawn_from_noise_normal(X: Tensor, mu: Tensor | float, sigma: Tenso
     normal_cdf = lambda z: 0.5 * (1 + torch.erf(z))
     return 1 - normal_cdf(Z) 
     
-class AdaptiveSignalProbNormal(Callable):
-    def __init__(self, M) -> None:
-        super().__init__() 
-        self.rolling_median = RollingMedian(0, M)
-    
-    def apply(self, X: Tensor) -> Tensor:
-        mu = self.rolling_median.apply(X) # rolling median to estimate the instantaneous mean
-        sigma = self.rolling_median.apply((X - mu).abs()) * 1.4826 # estimate a rolling std using a rolling median absolute deviation (MAD)
-        return prob_not_drawn_from_noise_normal(X, mu, sigma)
-        
-    
-class SignalProbNormal(Callable):
-    def __init__(self) -> None:
-        super().__init__()
-    
-    def apply(self, X: Tensor) -> Tensor:
-        mu = torch.median(X) # mean of entire sequence estimated by median
-        sigma = torch.median((X - mu).abs()) * 1.4826 # std estimated with median absolute deviation (MAD)
-        return prob_not_drawn_from_noise_normal(X, mu, sigma)
-    
+  
 class SignalProbPDF(Callable):
     def __init__(self, kappa) -> None:
         super().__init__()
@@ -206,17 +187,6 @@ class SignalProbPDF(Callable):
         var = torch.var(X_d)
         return mu, var
     
-class SignalProbGamma(SignalProbPDF):
-    def __init__(self, kappa) -> None:
-        super().__init__(kappa)
-        
-    def apply(self, X: Tensor) -> Tensor:
-        mu, var = self._get_estimate_moments(X)
-        # alpha and beta related to mean and variance
-        alpha = (mu / var) ** 2
-        beta = alpha / mu
-        Gamma = torch.distributions.gamma.Gamma(alpha, beta)
-        return Gamma.cdf(X)
     
 class EntropyScaler(Callable):
     # scales SE between 0-1 for easier threshold selection
@@ -283,13 +253,7 @@ def helble_gpl(nu_1=1, nu_2=2, gamma=1, t_dim=0, f_dim=1, k0=0, k1=-1) -> Detect
             NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
             HelbleWhitening(t_dim, f_dim, gamma), 
             GPLBase(nu_1, nu_2, t_dim, f_dim)
-        ])  
-    
-def aw_gpl(Mf, Mt, Mn, nu_1=1, nu_2=2, t_dim=0, f_dim=1, k0=0, k1=-1) -> DetectorChain:
-    return DetectorChain([
-        NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
-        SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
-        GPLBase(nu_1, nu_2, t_dim, f_dim)]) 
+        ])   
 
 def proposed_detector(k0, k1, Mf, Mt, Mn, Mh, sig, t_dim=0, f_dim=1, nu=2, kappa = 0.85) -> DetectorChain:
     # the detector proposed by this paper
@@ -312,23 +276,6 @@ def se(k0, k1, t_dim=0, f_dim=1, nu=1) -> DetectorChain:
         EntropyScaler(k1 - k0 + 1)
         ]) 
     
-def nuttall(k0, k1, nu = 2.5, t_dim=0, f_dim=1) -> DetectorChain:
-    return DetectorChain(
-        [
-            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
-            Nuttall(nu, t_dim=t_dim, f_dim=f_dim)
-        ]
-    )
-    
-def bled(k0, k1, t_dim=0, f_dim=1) -> DetectorChain:
-    # BLED is a special case of Nuttall, where we sum the squares
-    return DetectorChain(
-        [
-            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
-            Nuttall(1, t_dim=t_dim, f_dim=f_dim)
-        ]
-    )
-
 def aw_nuttall(k0, k1, Mf, Mt, Mn, nu = 2.5, t_dim=0, f_dim=1) -> DetectorChain:
     return DetectorChain(
         [
@@ -337,17 +284,7 @@ def aw_nuttall(k0, k1, Mf, Mt, Mn, nu = 2.5, t_dim=0, f_dim=1) -> DetectorChain:
             Nuttall(nu, t_dim=t_dim, f_dim=f_dim)
         ]
     )
-    
-def aw_bled(k0, k1, Mf, Mt, Mn, t_dim=0, f_dim=1) -> DetectorChain:
-    # BLED is a special case of Nuttall, where we sum the squares
-    return DetectorChain(
-        [
-            SpectralWhitener(Mf, Mt, Mn, nu=1, t_dim=t_dim, f_dim=f_dim), 
-            NarrowSelection(k0=k0, k1=k1, t_dim=t_dim, f_dim=f_dim ),
-            Nuttall(1, t_dim=t_dim, f_dim=f_dim)
-        ]
-    )
-    
+      
 def _find_start_end_pairs(T_th: Tensor):
     T_th[-1] = False #must always end the detection on the last sample, otherwise we won't have matching pairs
     prev = torch.zeros_like(T_th)
