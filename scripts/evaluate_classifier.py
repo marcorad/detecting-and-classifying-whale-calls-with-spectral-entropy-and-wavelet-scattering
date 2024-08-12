@@ -63,7 +63,7 @@ def iteration(n_calls, thresh, ws_a: Scattering1D, ws_d: Scattering1D):
                 y_train.extend([1]*n_calls)  
             
             # run the detector to find calls
-            proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh, t_dim=1, f_dim=0, kappa=params.kappa)
+            proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh, t_dim=1, f_dim=0, kappa=params.kappa, nu=params.nu_proposed_se)
             
             T = proposed_ws.apply(tf_ws)
             detections, det_idx = det.get_detections(T, 0.5, Tmin, Tmax, Text, fs_tf)
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     n_calls = 3 
     N_trials = 10
     exp_spacing = lambda low, high: np.exp(np.linspace(np.log(low), np.log(high), 10)).tolist()
-    thresh = exp_spacing(0.25, 0.01)
+    thresh = exp_spacing(0.2, 0.001)
     # thresh = [0.08]
     # print(thresh)     
     

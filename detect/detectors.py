@@ -181,7 +181,7 @@ class SignalProbPDF(Callable):
     def _get_estimate_moments(self, X: Tensor):
         L = X.shape[0]
         N = ceil(self.kappa * L)
-        X_d, _ = X.sort()
+        X_d, _ = X.flatten().sort()
         X_d = X_d[:N] # the data to use for the estimate        
         mu = torch.mean(X_d)
         var = torch.var(X_d)
@@ -223,9 +223,11 @@ class SignalProbBeta(SignalProbPDF):
         
         mu, var = self._get_estimate_moments(X)
         # alpha and beta related to mean and variance
-        nu = mu * (1 - mu) / var -1
+        nu = mu * (1 - mu) / var - 1
         alpha = mu * nu
         beta = (1 - mu) * nu
+        self.alpha = alpha
+        self.beta = beta
         self.beta_dist = torch.distributions.beta.Beta(alpha, beta)
         self.build_cdf_lut()
         return X >= self.crit_val

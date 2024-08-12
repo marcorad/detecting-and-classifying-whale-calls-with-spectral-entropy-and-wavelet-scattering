@@ -33,7 +33,7 @@ class Parameters(BaseModel):
     
     nu_proposed_se: float = 1.0 # nu for the SE calculation in the proposed detector
     
-    kappa: float = 0.85 # percentage of samples to use for the proposed detector's noise SE beta distribution estimate
+    kappa: float = 0.90 # percentage of samples to use for the proposed detector's noise SE beta distribution estimate
     
     #CLASSIFICATION
     
@@ -41,7 +41,7 @@ class Parameters(BaseModel):
     Q1_clf: float
     Q2_clf: float
     T_clf_win: float
-    normalise_s2: bool = False # whether to normalise scattering level 2 as s2 / s1 
+    normalise_s2: bool = True # whether to normalise scattering level 2 as s2 / s1 
     log_scattering_coeffs: bool = True # whether to use the logarithm of scattering coeffs
     eps: float = 1e-12 # numerical safety when taking the logarithm of the scattering coeffs
     scattering_dct: bool = True # whether to take the DCT of the coeffs (after log and normalisation)
@@ -133,7 +133,7 @@ BM_D_PARAMETERS = Parameters(
     Tn = 60*5,
     Tt = 0.5,
     
-    d_clf=512,
+    d_clf=256,
     Q1_clf=2,
     Q2_clf=1,
     T_clf_win=5,

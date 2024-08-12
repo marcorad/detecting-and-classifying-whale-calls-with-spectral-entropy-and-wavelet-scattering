@@ -55,8 +55,8 @@ def iteration(thresholds: Dict, iter_num = None):
             
             # DETECTORS
             # Proposed: SE with adaptive whitening
-            proposed_stft = det.proposed_detector(k0_stft, k1_stft, Mf, Mt, Mn, Mh, thresh['proposed_stft'], t_dim=1, f_dim=0, kappa=params.kappa)
-            proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh['proposed_ws'], t_dim=1, f_dim=0, kappa=params.kappa)
+            proposed_stft = det.proposed_detector(k0_stft, k1_stft, Mf, Mt, Mn, Mh, thresh['proposed_stft'], t_dim=1, f_dim=0, kappa=params.kappa, nu=params.nu_proposed_se)
+            proposed_ws = det.proposed_detector(0, K_ws-1, Mf, Mt, Mn, Mh, thresh['proposed_ws'], t_dim=1, f_dim=0, kappa=params.kappa, nu=params.nu_proposed_se)
             
             
             
@@ -154,8 +154,8 @@ if __name__ == "__main__":
                 'gpl_ws'            :    exp_spacing (bm_a_stats['gpl_ws'           ][0], bm_a_stats['gpl_ws'           ][1]/1.8),
                 'nuttall_aw_stft'   :    exp_spacing (bm_a_stats['nuttall_aw_stft'  ][0], bm_a_stats['nuttall_aw_stft'  ][1]/1.8),
                 'nuttall_aw_ws'     :    exp_spacing (bm_a_stats['nuttall_aw_ws'    ][0], bm_a_stats['nuttall_aw_ws'    ][1]/1.8),
-                'proposed_stft'     :    exp_spacing (0.3                               , 0.005                            ),
-                'proposed_ws'       :    exp_spacing (0.3                               , 0.005                            ),
+                'proposed_stft'     :    exp_spacing (0.3                               , 0.00001                            ),
+                'proposed_ws'       :    exp_spacing (0.3                               , 0.00001                            ),
                 'se_stft'           :    even_spacing(bm_a_stats['se_stft'          ][0], bm_a_stats['se_stft'          ][1]/1.8),
                 'se_ws'             :    even_spacing(bm_a_stats['se_ws'            ][0], bm_a_stats['se_ws'            ][1]/1.8),
             },
@@ -164,8 +164,8 @@ if __name__ == "__main__":
                 'gpl_ws'            :    exp_spacing (bm_d_stats['gpl_ws'           ][0], bm_d_stats['gpl_ws'           ][1]/1.8),
                 'nuttall_aw_stft'   :    exp_spacing (bm_d_stats['nuttall_aw_stft'  ][0], bm_d_stats['nuttall_aw_stft'  ][1]/1.8),
                 'nuttall_aw_ws'     :    exp_spacing (bm_d_stats['nuttall_aw_ws'    ][0], bm_d_stats['nuttall_aw_ws'    ][1]/1.8),
-                'proposed_stft'     :    exp_spacing (0.3                               , 0.005                            ),
-                'proposed_ws'       :    exp_spacing (0.3                               , 0.005                            ),
+                'proposed_stft'     :    exp_spacing (0.3                               , 0.00001                            ),
+                'proposed_ws'       :    exp_spacing (0.3                               , 0.00001                            ),
                 'se_stft'           :    even_spacing(bm_d_stats['se_stft'          ][0], bm_d_stats['se_stft'          ][1]/1.8),
                 'se_ws'             :    even_spacing(bm_d_stats['se_ws'            ][0], bm_d_stats['se_ws'            ][1]/1.8),
             }        

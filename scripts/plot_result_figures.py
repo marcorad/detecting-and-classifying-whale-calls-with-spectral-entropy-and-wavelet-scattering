@@ -76,7 +76,11 @@ def plot_prec_reca_multiple(lims, df: pd.DataFrame, config: dict, show_leg, name
         df_det.reset_index(inplace=True, drop=True)
   
         if len(df_det) > 15:
-            df_det = df_det.iloc[1::5]
+            df_det = df_det.iloc[1::3]
+        
+        if 'GPL' in config[det]['name']:
+            df_det = df_det.iloc[1::2]
+            
         plot_prec_reca(ax, df_det['prec'], df_det['reca'], index=config[det]['index'], dashed=config[det]['dashed'])
     if show_leg:
         ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.35),
