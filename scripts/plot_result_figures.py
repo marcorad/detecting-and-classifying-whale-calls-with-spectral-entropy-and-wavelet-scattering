@@ -15,6 +15,7 @@ plt.rcParams["mathtext.fontset"] = 'stix'
 markers = ['o', '^', 's', 'x', 'd', '*', '+']
 prop_cycle = plt.rcParams['axes.prop_cycle']
 colors = prop_cycle.by_key()['color']
+hatches = ['///', '..']
 
 # plt.plot([1, 2, 3, 4], [4,5, 6, 2])
 # plt.title('Hello')
@@ -164,11 +165,8 @@ def plot_detector_results(name, lims):
     fig = plot_prec_reca_multiple(lims, df, config, name=='a', name)
     fig.savefig(f'fig/prec_reca_{name}.pdf')
     
-def plot_clf_results(name, prec_lim, reca_lim, fpph_lim):
-    df, df_std = get_clf_df(name)
-    
-    
-    leg = ["Proposed ($\mathcal{S}_1$)", "Proposed ($\mathcal{S}_1$) + LDA"]
+def plot_clf_results():   
+    leg = ["Proposed (Bm-Ant)", "Proposed + LDA (Bm-Ant)", "Proposed (Bm-D)", "Proposed + LDA (Bm-D)"]
     
     # ax: Axes
     # fig: Figure
@@ -182,27 +180,66 @@ def plot_clf_results(name, prec_lim, reca_lim, fpph_lim):
     # ax.add_patch(Polygon(p1 + p2, hatch='///', edgecolor='k')) 
     
     # # ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
-    # box = ax.get_position()
-    # ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
         
     # df = df[(df['fpph_orig'] < fpph_lim) & (df['fpph_clf'] < fpph_lim)]
     ax: Axes
     fig: Figure
     fig, ax = plt.subplots()
-    fig.set_size_inches(5, 4)
-    plot_fpph_reca(ax, df['fpph_orig'], df['reca_orig'], 0, False)
-    p1 = [[f,p] for f, p in zip(df['fpph_clf'], df['reca_clf'] + df_std['reca_clf'])]
-    p2 = [[f,p] for f, p in zip(df['fpph_clf'], df['reca_clf'] - df_std['reca_clf'])]
-    p2.reverse()
-    ax.add_patch(Polygon(p1 + p2, hatch='///', edgecolor=colors[0], facecolor='w', linewidth=1.2)) 
+    fig.set_size_inches(5, 4)    
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
+    
+    for i, name in enumerate(['a', 'd']):
+        df, df_std = get_clf_df(name)
+        plot_prec_reca(ax, df['prec_orig'], df['reca_orig'], i, False)
+        p1 = [[f,p] for f, p in zip( df['reca_clf'] + df_std['reca_clf'], df['prec_clf'])]
+        p2 = [[f,p] for f, p in zip( df['reca_clf'] - df_std['reca_clf'], df['prec_clf'])]
+        
+        p2.reverse()
+        ax.add_patch(Polygon(p1 + p2, hatch=hatches[i], edgecolor=colors[i], facecolor='w', linewidth=1.2)) 
     # plot_fpph_reca(ax, df['fpph_clf'], df['reca_clf'], 1, False)
-    if name == 'a':
-        ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
+    
+    ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.25), fancybox=True, shadow=True, ncol=2)
     # box = ax.get_position()
     # ax.set_xlim([0, fpph_lim])
     # ax.set_ylim(None)
     # ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
-    fig.savefig(f'fig/clf_fpph_reca_{name}.pdf')
+    fig.savefig(f'fig/clf_fpph_reca.pdf')
+    
+def plot_improvement_results():
+    from scipy.interpolate import interp1d
+    ax: Axes
+    fig: Figure
+    fig, ax = plt.subplots()
+    fig.set_size_inches(5, 4)
+    for i, name in enumerate(['a', 'd']):
+        df, df_std = get_clf_df(name)
+        
+        orig_fpph_from_reca = interp1d([0] + df['reca_orig'].tolist(), [0] + df['fpph_orig'].tolist(), kind='quadratic')
+        
+        fpph_orig = orig_fpph_from_reca(df['reca_clf'])
+             
+        df['fpph_improvement'] = (fpph_orig - df['fpph_clf']) / fpph_orig * 100
+        df_std['fpph_uncertainty'] = df_std['fpph_clf'] / fpph_orig * 100
+        
+        
+        
+        p1 = [[f,p] for f, p in zip( df['reca_clf'], df['fpph_improvement'] + df_std['fpph_uncertainty'])]
+        p2 = [[f,p] for f, p in zip( df['reca_clf'], df['fpph_improvement'] - df_std['fpph_uncertainty'])]
+        p2.reverse()
+        ax.add_patch(Polygon(p1 + p2, hatch=hatches[i], edgecolor=colors[i], facecolor='w', linewidth=1.2)) 
+        # plot_fpph_reca(ax, df['fpph_clf'], df['reca_clf'], 1, False)
+        # box = ax.get_position()
+        # ax.set_xlim([0, fpph_lim])
+        # ax.set_ylim(None)
+        # ax.set_position([box.x0, box.y0 - box.height*0.0, box.width, box.height*0.9])
+        
+    leg = ["Bm-Ant", "Bm-D"]        
+    ax.legend(leg, loc='upper center',  bbox_to_anchor=(0.5, 1.15), fancybox=True, shadow=True, ncol=2)
+    ax.set_xlabel('Recall')
+    ax.set_ylabel('False Positives per Hour Improvement (%)')
+    ax.set_ylim([0, 100])
+    fig.savefig(f'fig/clf_fpph_reca_impr.pdf')
         
 
 # bma_res = pd.read_json('results/bm_a_detector_results.json', orient='records')
@@ -212,9 +249,9 @@ def plot_clf_results(name, prec_lim, reca_lim, fpph_lim):
 plot_detector_results('a', lims=[0.25, 0.25])
 plot_detector_results('d', lims=[0.1, 0.05])
 
-plot_clf_results('a', 0.25, 0.25, 10)
-plot_clf_results('d', 0.25, 0.25, 10)
+plot_clf_results()
+plot_improvement_results()
 
-# plt.show()
+plt.show()
 
 # print(get_clf_df('a'))
